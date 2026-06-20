@@ -51,6 +51,7 @@ function DatabaseRow({ node, depth }: { node: DatabaseNode; depth: number }) {
   const Chevron = isExpanded ? ChevronDown : ChevronRight;
   const status = connectionStatus.get(node.id) ?? "idle";
   const dotColor = STATUS_DOT_COLOR[status];
+  const isConnected = status === "connected";
 
   return (
     <li>
@@ -88,7 +89,7 @@ function DatabaseRow({ node, depth }: { node: DatabaseNode; depth: number }) {
           />
         ) : null}
       </div>
-      {isExpanded ? (
+      {isExpanded && isConnected ? (
         <ul role="group">
           {node.tables.map((table) => (
             <TreeRow key={table.id} node={table} depth={depth + 1} />

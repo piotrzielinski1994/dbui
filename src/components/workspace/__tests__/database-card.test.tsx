@@ -6,6 +6,7 @@ import { QueryWrapper } from "@/test/query-wrapper";
 import { WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { DatabaseCard } from "@/components/workspace/database-card";
 import { fixtureTree } from "@/components/workspace/__tests__/fixtures";
+import type { ConnectionConfig } from "@/components/workspace/mock-data";
 import { connectDatabase } from "@/lib/tauri";
 
 vi.mock("@/lib/tauri", () => ({
@@ -26,10 +27,17 @@ beforeEach(() => {
   mockConnect.mockResolvedValue([]);
 });
 
-function renderCard(activeTabId?: string) {
+function renderCard(
+  activeTabId?: string,
+  initialConnections?: [string, ConnectionConfig][],
+) {
   return render(
     <QueryWrapper>
-      <WorkspaceProvider tree={fixtureTree} initialActiveTabId={activeTabId}>
+      <WorkspaceProvider
+        tree={fixtureTree}
+        initialActiveTabId={activeTabId}
+        initialConnections={initialConnections}
+      >
         <DatabaseCard />
       </WorkspaceProvider>
     </QueryWrapper>,
@@ -136,5 +144,23 @@ describe("DatabaseCard auto-connect", () => {
     renderCard(undefined);
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(mockConnect).not.toHaveBeenCalled();
+  });
+
+  // behavior (restored connection still re-fetches its catalog on open)
+  it("should auto-connect a restored connection with its saved config when its view is opened", async () => {
+    const saved: ConnectionConfig = {
+      engine: "postgres",
+      host: "saved-host",
+      port: 5432,
+      database: "saved_db",
+      user: "saved_user",
+      password: "saved_pw",
+    };
+    mockConnect.mockResolvedValue(["restored_table"]);
+    renderCard("db-app", [["db-app", saved]]);
+
+    await waitFor(() => {
+      expect(mockConnect).toHaveBeenCalledWith(saved);
+    });
   });
 });

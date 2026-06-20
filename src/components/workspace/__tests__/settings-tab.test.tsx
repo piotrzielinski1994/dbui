@@ -303,7 +303,7 @@ describe("SettingsTab", () => {
 
 describe("SettingsTab connect flow updates the sidebar", () => {
   // AC-004, TC-001 - behavior (sidebar tables replaced by fetched names)
-  it("should replace the active database's sidebar tables with the fetched names on success", async () => {
+  it("should reveal the fetched table names in the sidebar on a successful connect", async () => {
     const user = userEvent.setup();
     mockConnect.mockResolvedValueOnce(["fetched_one", "fetched_two"]);
     renderSettings({
@@ -312,9 +312,10 @@ describe("SettingsTab connect flow updates the sidebar", () => {
       children: <SidebarTree />,
     });
 
+    // Not connected yet: no table leaves are shown (the app can't know them).
     expect(
-      screen.getByRole("treeitem", { name: "accounts" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("treeitem", { name: "accounts" }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
@@ -324,16 +325,10 @@ describe("SettingsTab connect flow updates the sidebar", () => {
     expect(
       screen.getByRole("treeitem", { name: "fetched_two" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("treeitem", { name: "accounts" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("treeitem", { name: "audit_log" }),
-    ).not.toBeInTheDocument();
   });
 
-  // AC-005, TC-002 - behavior (tables unchanged on error)
-  it("should leave the sidebar tables unchanged when the connect rejects", async () => {
+  // AC-005, TC-002 - behavior (no tables revealed when the connect fails)
+  it("should reveal no sidebar tables when the connect rejects", async () => {
     const user = userEvent.setup();
     mockConnect.mockRejectedValueOnce(new Error("boom"));
     renderSettings({
@@ -348,11 +343,11 @@ describe("SettingsTab connect flow updates the sidebar", () => {
       expect(mockToast.error).toHaveBeenCalled();
     });
     expect(
-      screen.getByRole("treeitem", { name: "accounts" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("treeitem", { name: "accounts" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("treeitem", { name: "audit_log" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("treeitem", { name: "audit_log" }),
+    ).not.toBeInTheDocument();
   });
 
   // AC-004, TC-005, E-3 - behavior (zero tables -> childless list + "0 tables" toast)

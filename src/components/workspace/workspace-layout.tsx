@@ -19,6 +19,8 @@ export function WorkspaceLayout() {
     isSidebarVisible,
     toggleSidebar,
     toggleConsole,
+    layouts,
+    saveLayout,
   } = useWorkspace();
   const isSplitView =
     activeNode?.kind === "database" && activeDatabaseTab === "sql";
@@ -54,19 +56,31 @@ export function WorkspaceLayout() {
 
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-        {isSidebarVisible ? (
-          <>
-            <ResizablePanel defaultSize="20%" minSize="12%" maxSize="40%">
-              <Sidebar />
-            </ResizablePanel>
-            <ResizableHandle />
-          </>
-        ) : null}
-        <ResizablePanel defaultSize="80%">
+      {isSidebarVisible ? (
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="h-full w-full"
+          defaultLayout={layouts.workspace}
+          onLayoutChanged={(layout) => saveLayout("workspace", layout)}
+        >
+          <ResizablePanel
+            id="sidebar"
+            defaultSize="20%"
+            minSize="12%"
+            maxSize="40%"
+          >
+            <Sidebar />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="content" defaultSize="80%">
+            <Main />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="h-full w-full">
           <Main />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </div>
+      )}
       <CommandPalette open={isPaletteOpen} onOpenChange={setIsPaletteOpen} />
       <Toaster />
     </>

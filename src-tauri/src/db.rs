@@ -264,15 +264,28 @@ fn strip_leading_noise(sql: &str) -> &str {
 // True when the statement yields a result set (so it must be wrapped + fetched),
 // false for write/DDL statements (which are executed for a rows-affected count).
 pub fn is_row_returning(sql: &str) -> bool {
-    let word: String = strip_leading_noise(sql)
+    matches!(
+        leading_keyword(sql).as_str(),
+        "SELECT" | "WITH" | "VALUES" | "TABLE" | "SHOW" | "EXPLAIN"
+    )
+}
+
+// A row-returning statement that can legally sit inside `(<sql>) AS alias` so it can be
+// wrapped in row_to_json. SELECT/WITH/VALUES/TABLE qualify; EXPLAIN and SHOW do NOT - Postgres
+// rejects them as subqueries ("syntax error at or near ..."), so they must run directly.
+pub fn is_subquery_wrappable(sql: &str) -> bool {
+    matches!(
+        leading_keyword(sql).as_str(),
+        "SELECT" | "WITH" | "VALUES" | "TABLE"
+    )
+}
+
+fn leading_keyword(sql: &str) -> String {
+    strip_leading_noise(sql)
         .chars()
         .take_while(|character| character.is_ascii_alphabetic())
         .collect::<String>()
-        .to_ascii_uppercase();
-    matches!(
-        word.as_str(),
-        "SELECT" | "WITH" | "VALUES" | "TABLE" | "SHOW" | "EXPLAIN"
-    )
+        .to_ascii_uppercase()
 }
 
 // Postgres path: the sqlx Any driver cannot describe native column types (timestamp,
@@ -388,6 +401,13 @@ async fn run_query_postgres(
         return Ok(non_row_outcome(result.rows_affected()));
     }
 
+    // EXPLAIN / SHOW return rows but cannot be subquery-wrapped, so they can't go through
+    // row_to_json. Their output columns are already text (QUERY PLAN, setting), which the Any
+    // driver decodes directly - fetch as-is.
+    if !is_subquery_wrappable(sql) {
+        return fetch_plain_text_rows(pool, sql.trim().trim_end_matches(';')).await;
+    }
+
     let wrapped = wrap_select_as_json(sql, limit);
     let data_rows = sqlx::query(&wrapped)
         .fetch_all(pool)
@@ -412,6 +432,48 @@ async fn run_query_postgres(
             .collect();
         columns = parse_json_rows(&probe_json)?.0;
     }
+
+    let count = rows.len();
+    Ok(QueryOutcome {
+        columns,
+        rows,
+        rows_affected: count as u64,
+        returns_rows: true,
+        message: format!("SELECT {count}"),
+    })
+}
+
+// Fetches a statement whose result columns are already Any-decodable text (EXPLAIN, SHOW).
+// Column names come from the first row's metadata; every cell reads as Option<String>.
+async fn fetch_plain_text_rows(
+    pool: &sqlx::AnyPool,
+    sql: &str,
+) -> Result<QueryOutcome, String> {
+    use sqlx::{Column, Row};
+
+    let data_rows = sqlx::query(sql)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let columns: Vec<String> = data_rows
+        .first()
+        .map(|row| {
+            row.columns()
+                .iter()
+                .map(|column| column.name().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let rows: Vec<Vec<Option<String>>> = data_rows
+        .iter()
+        .map(|row| {
+            (0..columns.len())
+                .map(|index| row.try_get::<Option<String>, _>(index).unwrap_or(None))
+                .collect()
+        })
+        .collect();
 
     let count = rows.len();
     Ok(QueryOutcome {
@@ -659,8 +721,9 @@ async fn write_cells(
 mod tests {
     use super::{
         build_rows_query, build_update_query, build_update_query_value, build_url, catalog_query,
-        columns_query, is_row_returning, parse_json_rows, primary_key_query, quote_identifier,
-        wrap_columns_probe, wrap_select_as_json, wrap_select_as_text, ConnectionConfig, DbEngine,
+        columns_query, is_row_returning, is_subquery_wrappable, parse_json_rows,
+        primary_key_query, quote_identifier, wrap_columns_probe, wrap_select_as_json,
+        wrap_select_as_text, ConnectionConfig, DbEngine,
     };
 
     fn cols() -> Vec<String> {
@@ -1009,6 +1072,27 @@ mod tests {
         assert!(is_row_returning("WITH x AS (SELECT 1) SELECT * FROM x"));
         assert!(is_row_returning("VALUES (1), (2)"));
         assert!(is_row_returning("EXPLAIN SELECT 1"));
+        assert!(is_row_returning("SHOW search_path"));
+    }
+
+    // behavior (SELECT/WITH/VALUES/TABLE can be subquery-wrapped; EXPLAIN/SHOW cannot)
+    #[test]
+    fn should_classify_subquery_wrappable_statements() {
+        assert!(is_subquery_wrappable("SELECT * FROM product"));
+        assert!(is_subquery_wrappable("  with x as (select 1) select * from x"));
+        assert!(is_subquery_wrappable("VALUES (1), (2)"));
+        assert!(is_subquery_wrappable("TABLE product"));
+    }
+
+    // behavior (EXPLAIN/SHOW return rows but must NOT be subquery-wrapped - PG rejects it)
+    #[test]
+    fn should_not_classify_explain_or_show_as_subquery_wrappable() {
+        assert!(!is_subquery_wrappable("EXPLAIN SELECT * FROM product"));
+        assert!(!is_subquery_wrappable("explain analyze select * from product"));
+        assert!(!is_subquery_wrappable("SHOW search_path"));
+        // still row-returning, just not wrappable
+        assert!(is_row_returning("EXPLAIN SELECT * FROM product"));
+        assert!(is_row_returning("explain analyze select * from product"));
         assert!(is_row_returning("SHOW search_path"));
     }
 

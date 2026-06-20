@@ -14,6 +14,7 @@ export function HorizontalSplit({
   className,
   orientation = "horizontal",
   initialLeftPercent = 50,
+  onLeftPercentChange,
 }: {
   left: ReactNode;
   right: ReactNode;
@@ -21,6 +22,7 @@ export function HorizontalSplit({
   className?: string;
   orientation?: SplitOrientation;
   initialLeftPercent?: number;
+  onLeftPercentChange?: (percent: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [leftPercent, setLeftPercent] = useState(initialLeftPercent);
@@ -50,6 +52,10 @@ export function HorizontalSplit({
     const stop = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", stop);
+      setLeftPercent((final) => {
+        onLeftPercentChange?.(final);
+        return final;
+      });
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", stop);

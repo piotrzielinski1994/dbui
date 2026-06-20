@@ -87,7 +87,8 @@ function SqlEditor({
   node: { id: string; sql: string };
   config: ConnectionConfig | undefined;
 }) {
-  const { addHistoryEntry, splitOrientation } = useWorkspace();
+  const { addHistoryEntry, splitOrientation, layouts, saveLayout } =
+    useWorkspace();
   const [sql, setSql] = useState(node.sql);
   const run = useMutation<QueryOutcome, unknown, string>({
     mutationFn: (query: string) =>
@@ -122,6 +123,8 @@ function SqlEditor({
       className="h-full"
       orientation={splitOrientation}
       ariaLabel="SQL editor and results"
+      initialLeftPercent={layouts.sql?.left ?? 50}
+      onLeftPercentChange={(percent) => saveLayout("sql", { left: percent })}
       left={
         <div className="flex h-full min-w-0 flex-col">
           <div className="flex h-9 shrink-0 items-stretch justify-end border-b bg-muted/30">

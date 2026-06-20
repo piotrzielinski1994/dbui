@@ -21,13 +21,21 @@ import {
   expandedToAppDb,
 } from "@/components/workspace/__tests__/fixtures";
 
-function renderLayout(opts?: { expanded?: string[]; activeTabId?: string }) {
+function renderLayout(opts?: {
+  expanded?: string[];
+  activeTabId?: string;
+  connected?: string[];
+}) {
   return render(
     <WorkspaceProvider
       tree={fixtureTree}
       consoleLines={fixtureConsoleLines}
       initialExpandedIds={opts?.expanded ?? expandedToAppDb}
       initialActiveTabId={opts?.activeTabId ?? "db-app"}
+      initialConnectionStatus={(opts?.connected ?? []).map((id) => [
+        id,
+        "connected",
+      ])}
     >
       <WorkspaceLayout />
     </WorkspaceProvider>,
@@ -85,7 +93,11 @@ describe("WorkspaceLayout", () => {
   // AC-006, AC-008, AC-015, AC-018, E-8 — behavior (a table tab renders a table card, not a database card)
   it("should render a table card without database sub-tabs when a table tab is active", async () => {
     const user = userEvent.setup();
-    renderLayout({ expanded: ["folder-staging"], activeTabId: undefined });
+    renderLayout({
+      expanded: ["folder-staging"],
+      activeTabId: undefined,
+      connected: ["db-admin"],
+    });
 
     await user.click(
       within(screen.getByRole("treeitem", { name: "admin_db" })).getByRole(

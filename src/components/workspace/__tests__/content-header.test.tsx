@@ -106,6 +106,7 @@ describe("ContentHeader", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <SidebarTree />
         <ContentHeader />
@@ -147,6 +148,7 @@ describe("ContentHeader", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <SidebarTree />
         <ContentHeader />
@@ -175,6 +177,7 @@ describe("ContentHeader", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <SidebarTree />
         <ContentHeader />

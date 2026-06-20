@@ -26,6 +26,7 @@ const mockConnect = vi.mocked(connectDatabase);
 function renderTree(opts?: {
   expanded?: string[];
   activeTabId?: string;
+  connected?: string[];
   children?: ReactNode;
 }) {
   return render(
@@ -33,6 +34,10 @@ function renderTree(opts?: {
       tree={fixtureTree}
       initialExpandedIds={opts?.expanded ?? []}
       initialActiveTabId={opts?.activeTabId}
+      initialConnectionStatus={(opts?.connected ?? []).map((id) => [
+        id,
+        "connected",
+      ])}
     >
       <SidebarTree />
       {opts?.children}
@@ -150,10 +155,32 @@ describe("SidebarTree", () => {
     ).toBeInTheDocument();
   });
 
+  // behavior (tables hidden until connected: app can't know tables before a connect)
+  it("should not reveal table leaves when an expanded database is not connected", async () => {
+    const user = userEvent.setup();
+    renderTree({ expanded: ["folder-staging"] });
+
+    const dbRow = screen.getByRole("treeitem", { name: "admin_db" });
+    await user.click(
+      within(dbRow).getByRole("button", { name: /toggle .*tables/i }),
+    );
+
+    expect(
+      screen.queryByRole("treeitem", { name: "accounts" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("treeitem", { name: "audit_log" }),
+    ).not.toBeInTheDocument();
+  });
+
   // TC-002, AC-004, E-2 — behavior (chevron reveals tables; no card opens)
   it("should reveal a database's table leaves and open no tab when its chevron is clicked", async () => {
     const user = userEvent.setup();
-    renderTree({ expanded: ["folder-staging"], children: <ContentHeader /> });
+    renderTree({
+      expanded: ["folder-staging"],
+      connected: ["db-admin"],
+      children: <ContentHeader />,
+    });
 
     const dbRow = screen.getByRole("treeitem", { name: "admin_db" });
     expect(dbRow).toHaveAttribute("aria-expanded", "false");
@@ -184,7 +211,7 @@ describe("SidebarTree", () => {
   // AC-004, E-2 — behavior (chevron is a toggle)
   it("should hide a database's table leaves when its chevron is clicked a second time", async () => {
     const user = userEvent.setup();
-    renderTree({ expanded: ["folder-staging"] });
+    renderTree({ expanded: ["folder-staging"], connected: ["db-admin"] });
 
     const chevron = () =>
       within(screen.getByRole("treeitem", { name: "admin_db" })).getByRole(
@@ -244,7 +271,11 @@ describe("SidebarTree", () => {
   // AC-006, TC-004 — behavior (clicking a table leaf opens a table tab + selects it)
   it("should open a table tab and select the leaf when a table is clicked", async () => {
     const user = userEvent.setup();
-    renderTree({ expanded: ["folder-staging"], children: <ContentHeader /> });
+    renderTree({
+      expanded: ["folder-staging"],
+      connected: ["db-admin"],
+      children: <ContentHeader />,
+    });
 
     await user.click(
       within(screen.getByRole("treeitem", { name: "admin_db" })).getByRole(

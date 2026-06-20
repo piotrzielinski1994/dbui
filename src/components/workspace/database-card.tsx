@@ -69,26 +69,32 @@ function useAutoConnect() {
   const { connect } = useConnectionActions();
   const id = activeNode?.kind === "database" ? activeNode.id : null;
   const status = id ? connectionStatus.get(id) : undefined;
-  const isConnected = id ? connections.has(id) : false;
 
   useEffect(() => {
     if (!id || !activeNode || activeNode.kind !== "database") {
       return;
     }
-    // Only on first sight (status undefined). A manual Disconnect sets "idle",
-    // a failure sets "error" - neither should trigger an auto-reconnect loop.
-    if (isConnected || status !== undefined) {
+    // Only on first sight this session (status undefined). A manual Disconnect
+    // sets "idle", a failure sets "error" - neither should auto-reconnect. A
+    // restored connection has a config in the map but no status yet, so it must
+    // still fetch its live catalog here (the saved config is not a live session).
+    if (status !== undefined) {
       return;
     }
-    connect(id, {
-      engine: activeNode.engine,
-      host: activeNode.host,
-      port: activeNode.port,
-      database: activeNode.database,
-      user: activeNode.user,
-      password: activeNode.password,
-    });
-    // connect identity changes each render (new closure); gate on node id + status only.
+    // Prefer the restored/edited config over the node's seed defaults.
+    const saved = connections.get(id);
+    connect(
+      id,
+      saved ?? {
+        engine: activeNode.engine,
+        host: activeNode.host,
+        port: activeNode.port,
+        database: activeNode.database,
+        user: activeNode.user,
+        password: activeNode.password,
+      },
+    );
+    // connect/connections identities change each render; gate on node id + status only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isConnected, status]);
+  }, [id, status]);
 }

@@ -1,7 +1,16 @@
+import { useState } from "react";
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
+import { SettingsProvider } from "@/lib/settings/settings-context";
+import { createTauriSettingsStore } from "@/lib/settings/tauri-store";
 
 function RootLayout() {
-  return <Outlet />;
+  const [settingsStore] = useState(createTauriSettingsStore);
+
+  return (
+    <SettingsProvider store={settingsStore}>
+      <Outlet />
+    </SettingsProvider>
+  );
 }
 
 function NotFound() {

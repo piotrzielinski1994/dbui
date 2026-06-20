@@ -55,11 +55,13 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > that database's sidebar tables with the live catalog. Status shows as a toast + a coloured
 > dot on the database row. Opening a table of a connected database fetches its real content
 > (first 200 rows, NULL shown as `[NULL]`); tables of the mock databases still show mock
-> rows. Settings are session-only (not persisted). The SQL tab is live: edit SQL and Run it
+> rows. The SQL tab is live: edit SQL and Run it
 > (or Cmd/Ctrl+Enter) against the connected database - row-returning queries show a result
 > grid, other statements report rows-affected. The editor|results split flips between
 > side-by-side and stacked via `Cmd/Ctrl+\` (or the "Toggle split layout" palette command).
-> Views/Script tabs remain mock; persistence is out of scope.
+> Views/Script tabs remain mock. UI/layout state (panel toggles, split orientation, expanded
+> nodes, open tabs) and database connections persist across restarts as JSON files in the OS
+> app-config dir (via `@tauri-apps/plugin-store`).
 
 ## Repo layout
 
@@ -75,7 +77,9 @@ src/
                         database card (SQL/Views/Script/Connection), table card, console,
                         command palette (Cmd/Ctrl+K)
     ui/                 shadcn primitives
-  lib/                  tauri.ts (typed invoke wrappers), utils.ts (cn)
+  lib/                  tauri.ts (typed invoke wrappers), utils.ts (cn),
+                        settings/ (JSON-file persistence: types + mergeSettings,
+                        tauri/in-memory stores, SettingsProvider)
   index.css             Tailwind v4 + theme tokens
   test/setup.ts         Vitest + Testing Library setup
 src-tauri/              Rust desktop shell (greet command, tauri.conf.json)

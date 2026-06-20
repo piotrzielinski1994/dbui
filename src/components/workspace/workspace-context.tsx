@@ -1,10 +1,16 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import type {
+  PanelGroupKey,
+  PanelLayout,
+  Settings,
+} from "@/lib/settings/settings";
 import {
   mockConsoleLines,
   mockTree,
@@ -57,6 +63,8 @@ type WorkspaceContextValue = {
   history: HistoryEntry[];
   splitOrientation: SplitOrientation;
   toggleSplitOrientation: () => void;
+  layouts: Settings["layouts"];
+  saveLayout: (group: PanelGroupKey, layout: PanelLayout) => void;
   isSidebarVisible: boolean;
   toggleSidebar: () => void;
   isConsoleVisible: boolean;
@@ -151,7 +159,14 @@ type WorkspaceProviderProps = {
   consoleLines?: string[];
   initialExpandedIds?: string[];
   initialActiveTabId?: string;
+  initialOpenTabIds?: string[];
   initialConnections?: [string, ConnectionConfig][];
+  initialConnectionStatus?: [string, ConnectionStatus][];
+  initialSidebarHidden?: boolean;
+  initialConsoleHidden?: boolean;
+  initialSplitOrientation?: SplitOrientation;
+  initialLayouts?: Settings["layouts"];
+  onPersist?: (settings: Settings) => void;
 };
 
 export function WorkspaceProvider({
@@ -160,7 +175,14 @@ export function WorkspaceProvider({
   consoleLines = mockConsoleLines,
   initialExpandedIds = [],
   initialActiveTabId,
+  initialOpenTabIds,
   initialConnections = [],
+  initialConnectionStatus = [],
+  initialSidebarHidden = false,
+  initialConsoleHidden = false,
+  initialSplitOrientation = "horizontal",
+  initialLayouts = {},
+  onPersist,
 }: WorkspaceProviderProps) {
   const [tree, setTree] = useState(initialTree);
   const nodesById = useMemo(() => indexNodes(tree), [tree]);
@@ -168,7 +190,7 @@ export function WorkspaceProvider({
 
   const [connectionStatus, setConnectionStatusMap] = useState<
     Map<string, ConnectionStatus>
-  >(() => new Map());
+  >(() => new Map(initialConnectionStatus));
   const [connections, setConnectionsMap] = useState<
     Map<string, ConnectionConfig>
   >(() => new Map(initialConnections));
@@ -177,7 +199,7 @@ export function WorkspaceProvider({
     () => new Set(initialExpandedIds),
   );
   const [openTabIds, setOpenTabIds] = useState<string[]>(
-    initialActiveTabId ? [initialActiveTabId] : [],
+    initialOpenTabIds ?? (initialActiveTabId ? [initialActiveTabId] : []),
   );
   const [activeTabId, setActiveTabId] = useState<string | null>(
     initialActiveTabId ?? null,
@@ -186,10 +208,14 @@ export function WorkspaceProvider({
     useState<DatabaseTab>("sql");
   const [pendingEdits, setPendingEdits] = useState<PendingEdit[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [splitOrientation, setSplitOrientation] =
-    useState<SplitOrientation>("horizontal");
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
-  const [isConsoleVisible, setIsConsoleVisible] = useState(true);
+  const [splitOrientation, setSplitOrientation] = useState<SplitOrientation>(
+    initialSplitOrientation,
+  );
+  const [layouts, setLayouts] = useState<Settings["layouts"]>(initialLayouts);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(
+    !initialSidebarHidden,
+  );
+  const [isConsoleVisible, setIsConsoleVisible] = useState(!initialConsoleHidden);
 
   const value = useMemo<WorkspaceContextValue>(() => {
     const openNode = (id: string) => {
@@ -277,6 +303,9 @@ export function WorkspaceProvider({
         setSplitOrientation((current) =>
           current === "horizontal" ? "vertical" : "horizontal",
         ),
+      layouts,
+      saveLayout: (group, layout) =>
+        setLayouts((current) => ({ ...current, [group]: layout })),
       isSidebarVisible,
       toggleSidebar: () => setIsSidebarVisible((current) => !current),
       isConsoleVisible,
@@ -296,8 +325,36 @@ export function WorkspaceProvider({
     pendingEdits,
     history,
     splitOrientation,
+    layouts,
     isSidebarVisible,
     isConsoleVisible,
+  ]);
+
+  useEffect(() => {
+    if (!onPersist) {
+      return;
+    }
+    onPersist({
+      version: 1,
+      sidebarHidden: !isSidebarVisible,
+      consoleHidden: !isConsoleVisible,
+      splitOrientation,
+      layouts,
+      expandedIds: [...expandedIds],
+      openTabIds,
+      activeTabId,
+      connections: Object.fromEntries(connections),
+    });
+  }, [
+    onPersist,
+    isSidebarVisible,
+    isConsoleVisible,
+    splitOrientation,
+    layouts,
+    expandedIds,
+    openTabIds,
+    activeTabId,
+    connections,
   ]);
 
   return (

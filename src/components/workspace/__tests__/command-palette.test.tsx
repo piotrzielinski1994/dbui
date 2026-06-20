@@ -158,6 +158,7 @@ describe("WorkspaceLayout command palette", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <WorkspaceLayout />
       </WorkspaceProvider>,
@@ -188,6 +189,7 @@ describe("WorkspaceLayout command palette", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <WorkspaceLayout />
       </WorkspaceProvider>,
@@ -214,6 +216,7 @@ describe("WorkspaceLayout command palette", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <WorkspaceLayout />
       </WorkspaceProvider>,
@@ -241,6 +244,7 @@ describe("WorkspaceLayout command palette", () => {
       <WorkspaceProvider
         tree={fixtureTree}
         initialExpandedIds={["folder-staging"]}
+        initialConnectionStatus={[["db-admin", "connected"]]}
       >
         <WorkspaceLayout />
       </WorkspaceProvider>,
