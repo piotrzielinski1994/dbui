@@ -1,28 +1,101 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { DataGrid } from "@/components/workspace/data-grid";
+import { CopyButtons, DataGrid } from "@/components/workspace/data-grid";
 import { HorizontalSplit } from "@/components/workspace/horizontal-split";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { executeSql, type QueryOutcome } from "@/lib/tauri";
-import type { ConnectionConfig } from "@/lib/workspace/model";
+import type { ConnectionConfig, Sort } from "@/lib/workspace/model";
 
 const noop = () => {};
+const alwaysFalse = () => false;
+
+// The SQL result holds arbitrary user-query rows whose types are unknown, so sorting happens
+// client-side over the in-memory rows (no re-run). Locale-compares cells, NULLs sort last.
+function sortRows(
+  columns: string[],
+  rows: (string | null)[][],
+  sort: Sort | null,
+): (string | null)[][] {
+  if (!sort) {
+    return rows;
+  }
+  const index = columns.indexOf(sort.column);
+  if (index < 0) {
+    return rows;
+  }
+  const direction = sort.descending ? -1 : 1;
+  return [...rows].sort((left, right) => {
+    const a = left[index];
+    const b = right[index];
+    if (a === b) {
+      return 0;
+    }
+    if (a === null) {
+      return 1;
+    }
+    if (b === null) {
+      return -1;
+    }
+    return a.localeCompare(b, undefined, { numeric: true }) * direction;
+  });
+}
 
 function OutcomeGrid({ outcome }: { outcome: QueryOutcome }) {
+  const [sort, setSort] = useState<Sort | null>(null);
+
+  const rows = useMemo(
+    () => sortRows(outcome.columns, outcome.rows, sort),
+    [outcome.columns, outcome.rows, sort],
+  );
+
+  const cycleSort = useCallback(
+    (column: string) =>
+      setSort((current) => {
+        if (!current || current.column !== column) {
+          return { column, descending: false };
+        }
+        if (!current.descending) {
+          return { column, descending: true };
+        }
+        return null;
+      }),
+    [],
+  );
+
+  const editValueAt = useCallback(
+    (rowIndex: number, column: string) =>
+      rows[rowIndex]?.[outcome.columns.indexOf(column)] ?? null,
+    [rows, outcome.columns],
+  );
+
   return (
-    <DataGrid
-      columns={outcome.columns}
-      rows={outcome.rows}
-      selectedRow={-1}
-      onSelectRow={noop}
-      editable={false}
-      editValueAt={(rowIndex, column) =>
-        outcome.rows[rowIndex]?.[outcome.columns.indexOf(column)] ?? null
-      }
-      isDirtyAt={() => false}
-      onCommitEdit={noop}
-    />
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <DataGrid
+          columns={outcome.columns}
+          rows={rows}
+          selectedRow={-1}
+          onSelectRow={noop}
+          editable={false}
+          editValueAt={editValueAt}
+          isDirtyAt={alwaysFalse}
+          onCommitEdit={noop}
+          sort={sort}
+          onSortColumn={cycleSort}
+        />
+      </div>
+      <div className="flex h-9 shrink-0 items-stretch border-t bg-muted/30">
+        <span className="flex items-center px-3 text-xs text-muted-foreground">
+          {rows.length} rows
+        </span>
+        <CopyButtons
+          className="ml-auto h-full items-stretch"
+          columns={outcome.columns}
+          rows={rows}
+        />
+      </div>
+    </div>
   );
 }
 

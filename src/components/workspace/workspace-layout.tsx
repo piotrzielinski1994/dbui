@@ -74,31 +74,34 @@ export function WorkspaceLayout() {
 
   return (
     <>
-      {isSidebarVisible ? (
-        <ResizablePanelGroup
-          orientation="horizontal"
-          className="h-full w-full"
-          defaultLayout={layouts.workspace}
-          onLayoutChanged={(layout) => saveLayout("workspace", layout)}
-        >
-          <ResizablePanel
-            id="sidebar"
-            defaultSize="20%"
-            minSize="12%"
-            maxSize="40%"
-          >
-            <Sidebar />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="content" defaultSize="80%">
-            <Main />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      ) : (
-        <div className="h-full w-full">
+      {/* The group is rendered unconditionally and the content panel keeps a stable key+order so
+          toggling the sidebar only adds/removes the sidebar panel - it never remounts <Main/> (and
+          the open table grid). Swapping the whole group for a bare <div> used to unmount the grid,
+          forcing a costly 200-row TanStack rebuild on every Cmd+B - that was the toggle lag. */}
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="h-full w-full"
+        defaultLayout={layouts.workspace}
+        onLayoutChanged={(layout) => saveLayout("workspace", layout)}
+      >
+        {isSidebarVisible
+          ? [
+              <ResizablePanel
+                key="sidebar"
+                id="sidebar"
+                defaultSize="20%"
+                minSize="12%"
+                maxSize="40%"
+              >
+                <Sidebar />
+              </ResizablePanel>,
+              <ResizableHandle key="handle" />,
+            ]
+          : null}
+        <ResizablePanel key="content" id="content" defaultSize="80%">
           <Main />
-        </div>
-      )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
       <CommandPalette
         open={isPaletteOpen}
         onOpenChange={setIsPaletteOpen}

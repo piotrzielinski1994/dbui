@@ -7,15 +7,17 @@ import { WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { TableCard } from "@/components/workspace/table-card";
 import { Console } from "@/components/workspace/console";
 import { toast } from "sonner";
-import { fetchTable, updateTable } from "@/lib/tauri";
+import { fetchTable, countTable, updateTable } from "@/lib/tauri";
 import type {
   ConnectionConfig,
+  TableColumn,
   TableRows,
   TreeNode,
 } from "@/lib/workspace/model";
 
 vi.mock("@/lib/tauri", () => ({
   fetchTable: vi.fn(),
+  countTable: vi.fn(),
   updateTable: vi.fn(),
 }));
 
@@ -27,6 +29,7 @@ vi.mock("sonner", () => ({
 }));
 
 const mockFetch = vi.mocked(fetchTable);
+const mockCount = vi.mocked(countTable);
 const mockUpdate = vi.mocked(updateTable);
 const mockToast = vi.mocked(toast);
 
@@ -94,14 +97,32 @@ function renderLive() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockCount.mockResolvedValue(0);
 });
 
+function column(name: string, overrides?: Partial<TableColumn>): TableColumn {
+  return {
+    name,
+    dataType: overrides?.dataType ?? "text",
+    nullable: overrides?.nullable ?? true,
+    isPrimaryKey: overrides?.isPrimaryKey ?? false,
+  };
+}
+
 function rowsResult(
-  columns: string[],
+  columns: (string | TableColumn)[],
   rows: (string | null)[][],
   primaryKey: string | null = "id",
 ): TableRows {
-  return { columns, rows, primaryKey };
+  return {
+    columns: columns.map((col) =>
+      typeof col === "string"
+        ? column(col, { isPrimaryKey: col === primaryKey })
+        : col,
+    ),
+    rows,
+    primaryKey,
+  };
 }
 
 describe("TableCard live content", () => {
@@ -145,6 +166,58 @@ describe("TableCard live content", () => {
     expect(await screen.findByText("[NULL]")).toBeInTheDocument();
   });
 
+  // behavior (the header row sticks to the top so vertical scroll keeps it visible)
+  it("should render a sticky header row", async () => {
+    mockFetch.mockResolvedValueOnce(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    const header = await screen.findByRole("columnheader", { name: "id" });
+    expect(header.className).toContain("sticky");
+    expect(header.className).toContain("top-0");
+    // border-collapse scrolls a real border away, so the 1px divider is an inset shadow that
+    // travels with the cell (design.md: dividers stay 1px). Pin it so it can't be dropped.
+    expect(header.className).toContain("shadow-[inset_0_-1px_0_var(--border)]");
+  });
+
+  // behavior (AC-004: header shows the column type and a PK marker)
+  it("should show the column data type and a PK marker in the header", async () => {
+    mockFetch.mockResolvedValueOnce(
+      rowsResult(
+        [
+          column("id", { dataType: "int4", nullable: false, isPrimaryKey: true }),
+          column("name", { dataType: "text", nullable: false }),
+        ],
+        [["1", "Widget"]],
+        "id",
+      ),
+    );
+    renderLive();
+
+    const idHeader = await screen.findByRole("columnheader", { name: "id" });
+    expect(idHeader).toHaveTextContent("int4");
+    expect(idHeader).toHaveTextContent("PK");
+  });
+
+  // behavior (AC-004: a not-null column shows NN, a nullable one does not)
+  it("should mark a not-null column with NN and leave nullable columns unmarked", async () => {
+    mockFetch.mockResolvedValueOnce(
+      rowsResult(
+        [
+          column("id", { dataType: "int4", nullable: false, isPrimaryKey: true }),
+          column("note", { dataType: "text", nullable: true }),
+        ],
+        [["1", "hi"]],
+        "id",
+      ),
+    );
+    renderLive();
+
+    const idHeader = await screen.findByRole("columnheader", { name: "id" });
+    expect(idHeader).toHaveTextContent("NN");
+    const noteHeader = screen.getByRole("columnheader", { name: "note" });
+    expect(noteHeader).not.toHaveTextContent("NN");
+  });
+
   // behavior (fetch failure surfaces an error state)
   it("should show an error state when the fetch rejects", async () => {
     mockFetch.mockRejectedValueOnce(new Error("relation does not exist"));
@@ -161,7 +234,11 @@ describe("TableCard live content", () => {
     renderLive();
 
     await screen.findByText("1");
-    expect(mockFetch).toHaveBeenCalledWith(config, "product", undefined);
+    expect(mockFetch).toHaveBeenCalledWith(
+      config,
+      "product",
+      expect.objectContaining({ filter: undefined }),
+    );
   });
 
   // behavior (the filter runs only on Enter, not on idle keystrokes)
@@ -177,7 +254,11 @@ describe("TableCard live content", () => {
     );
 
     // not applied yet - no Enter
-    expect(mockFetch).not.toHaveBeenCalledWith(config, "product", "price > 10");
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      config,
+      "product",
+      expect.objectContaining({ filter: "price > 10" }),
+    );
 
     await user.keyboard("{Enter}");
 
@@ -185,7 +266,7 @@ describe("TableCard live content", () => {
       expect(mockFetch).toHaveBeenLastCalledWith(
         config,
         "product",
-        "price > 10",
+        expect.objectContaining({ filter: "price > 10" }),
       );
     });
   });
@@ -207,7 +288,7 @@ describe("TableCard live content", () => {
       expect(mockFetch).toHaveBeenLastCalledWith(
         config,
         "product",
-        "price > 10",
+        expect.objectContaining({ filter: "price > 10" }),
       );
     });
   });
@@ -242,14 +323,14 @@ describe("TableCard live content", () => {
       expect(mockFetch).toHaveBeenLastCalledWith(
         config,
         "product",
-        "price > 10",
+        expect.objectContaining({ filter: "price > 10" }),
       );
     });
     await user.click(screen.getByRole("tab", { name: /history/i }));
 
     const history = screen.getByRole("list", { name: /query history/i });
     expect(history).toHaveTextContent(
-      `SELECT * FROM "product" WHERE price > 10 LIMIT 200`,
+      `SELECT * FROM "product" WHERE (price > 10) LIMIT 200`,
     );
   });
 
@@ -265,6 +346,273 @@ describe("TableCard live content", () => {
     const history = screen.getByRole("list", { name: /query history/i });
     expect(history).toHaveTextContent("ERR");
     expect(history).toHaveTextContent(`relation "nope" does not exist`);
+  });
+});
+
+describe("TableCard sorting", () => {
+  // behavior (the sort affordance is visible on every column before any click)
+  it("should show a sort indicator on each header even when unsorted", async () => {
+    mockFetch.mockResolvedValue(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    const idHeader = await screen.findByRole("columnheader", { name: "id" });
+    const priceHeader = screen.getByRole("columnheader", { name: "price" });
+    expect(idHeader).toHaveTextContent("▾");
+    expect(priceHeader).toHaveTextContent("▾");
+  });
+
+  // behavior (the active sort header shows a solid directional triangle)
+  it("should show a solid up triangle on the ascending-sorted column", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    await screen.findByText("999");
+    await user.click(screen.getByRole("columnheader", { name: "price" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("columnheader", { name: "price" }),
+      ).toHaveTextContent("▲");
+    });
+  });
+
+  // behavior (AC-002: clicking a header re-fetches with ORDER BY that column ascending)
+  it("should re-fetch sorted ascending when a column header is clicked", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    await screen.findByText("999");
+    await user.click(screen.getByRole("columnheader", { name: "price" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({
+          sort: { column: "price", descending: false },
+        }),
+      );
+    });
+  });
+
+  // behavior (AC-002: a second click flips to descending)
+  it("should re-fetch sorted descending on the second click of the same header", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    await screen.findByText("999");
+    await user.click(screen.getByRole("columnheader", { name: "price" }));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({ sort: { column: "price", descending: false } }),
+      );
+    });
+    await user.click(screen.getByRole("columnheader", { name: "price" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({
+          sort: { column: "price", descending: true },
+        }),
+      );
+    });
+  });
+
+  // behavior (AC-002: the header shows the direction arrow; a third click clears it)
+  it("should show asc then desc arrows and clear the indicator on the third click", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id", "price"], [["1", "999"]]));
+    renderLive();
+
+    await screen.findByText("999");
+    const price = () => screen.getByRole("columnheader", { name: "price" });
+
+    await user.click(price());
+    await waitFor(() => expect(price()).toHaveTextContent("▲"));
+
+    await user.click(price());
+    await waitFor(() => expect(price()).toHaveTextContent("▼"));
+
+    await user.click(price());
+    await waitFor(() => {
+      expect(price()).not.toHaveTextContent("▲");
+      expect(price()).not.toHaveTextContent("▼");
+    });
+  });
+});
+
+describe("TableCard pagination", () => {
+  const PAGE = Array.from({ length: 200 }, (_, index) => [String(index + 1)]);
+
+  // behavior (AC-001: a full page reveals Load more, which appends the next page)
+  it("should show Load more for a full page and append the next page when clicked", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], PAGE));
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], [["201"], ["202"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    const loadMore = await screen.findByRole("button", { name: /load more/i });
+    await user.click(loadMore);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({ offset: 200 }),
+      );
+    });
+    expect(await screen.findByText("201")).toBeInTheDocument();
+    // first page still present (appended, not replaced)
+    expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  // behavior (AC-001: a short page hides Load more)
+  it("should not show Load more when fewer than a full page returns", async () => {
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], [["1"], ["2"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    expect(
+      screen.queryByRole("button", { name: /load more/i }),
+    ).toBeNull();
+  });
+
+  // behavior (AC-003: changing the sort resets pagination to the first page)
+  it("should reset to the first page when the sort changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], PAGE));
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], [["201"]]));
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    await user.click(await screen.findByRole("button", { name: /load more/i }));
+    await screen.findByText("201");
+
+    await user.click(screen.getByRole("columnheader", { name: "id" }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({
+          offset: 0,
+          sort: { column: "id", descending: false },
+        }),
+      );
+    });
+    expect(screen.queryByText("201")).toBeNull();
+  });
+
+  // behavior (status bar shows the unbounded total returned by count_table)
+  it("should show the loaded-vs-total row count in the status bar", async () => {
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], [["1"], ["2"]]));
+    mockCount.mockResolvedValue(4096);
+    renderLive();
+
+    await screen.findByText("1");
+    expect(await screen.findByText(/2 of 4096 rows/i)).toBeInTheDocument();
+  });
+
+  // behavior (the unbounded total is keyed on the filter only - sorting must not recount)
+  it("should not recount the table when only the sort changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    mockCount.mockResolvedValue(10);
+    renderLive();
+
+    await screen.findByText("1");
+    expect(mockCount).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("columnheader", { name: "id" }));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({ sort: { column: "id", descending: false } }),
+      );
+    });
+    // the count query did not run again - sort does not change how many rows match
+    expect(mockCount).toHaveBeenCalledTimes(1);
+  });
+
+  // behavior (typing a new page size re-fetches from offset 0 with the new limit)
+  it("should re-fetch with the typed page size from the first page", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    const pageSize = screen.getByRole("spinbutton", { name: /page size/i });
+    await user.clear(pageSize);
+    await user.type(pageSize, "500");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({ limit: 500, offset: 0 }),
+      );
+    });
+  });
+
+  // behavior (AC-007, TC-008: Copy CSV on the table card copies the loaded rows)
+  it("should copy the table-card rows to the clipboard as CSV", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockFetch.mockResolvedValue(
+      rowsResult(["id", "name"], [["1", "Ada"]]),
+    );
+    renderLive();
+
+    await screen.findByText("Ada");
+    await user.click(screen.getByRole("button", { name: /copy csv/i }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("id,name\n1,Ada");
+    });
+  });
+
+  // behavior (AC-003: changing the filter resets pagination to the first page)
+  it("should reset to the first page when the filter changes", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], PAGE));
+    mockFetch.mockResolvedValueOnce(rowsResult(["id"], [["201"]]));
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["5"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    await user.click(await screen.findByRole("button", { name: /load more/i }));
+    await screen.findByText("201");
+
+    await user.type(
+      screen.getByRole("textbox", { name: /filter/i }),
+      "id = 5",
+    );
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        config,
+        "product",
+        expect.objectContaining({ offset: 0, filter: "id = 5" }),
+      );
+    });
+    // the accumulated second page is gone after the filter reset
+    expect(screen.queryByText("201")).toBeNull();
   });
 });
 
@@ -568,7 +916,11 @@ describe("TableCard filter with unsaved edits", () => {
     expect(
       await screen.findByRole("dialog", { name: /discard/i }),
     ).toBeInTheDocument();
-    expect(mockFetch).not.toHaveBeenCalledWith(config, "product", "price > 10");
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      config,
+      "product",
+      expect.objectContaining({ filter: "price > 10" }),
+    );
   });
 
   // behavior (confirming discards the edits and applies the filter)
@@ -590,7 +942,7 @@ describe("TableCard filter with unsaved edits", () => {
       expect(mockFetch).toHaveBeenLastCalledWith(
         config,
         "product",
-        "price > 10",
+        expect.objectContaining({ filter: "price > 10" }),
       );
     });
     // edits are gone (no Save bar, no Changes tab)
@@ -615,7 +967,11 @@ describe("TableCard filter with unsaved edits", () => {
 
     await user.click(await screen.findByRole("button", { name: /cancel/i }));
 
-    expect(mockFetch).not.toHaveBeenCalledWith(config, "product", "price > 10");
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      config,
+      "product",
+      expect.objectContaining({ filter: "price > 10" }),
+    );
     expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
   });
 
@@ -635,8 +991,30 @@ describe("TableCard filter with unsaved edits", () => {
       expect(mockFetch).toHaveBeenLastCalledWith(
         config,
         "product",
-        "price > 10",
+        expect.objectContaining({ filter: "price > 10" }),
       );
     });
+  });
+});
+
+describe("TableCard filter statement guard", () => {
+  // behavior (a semicolon in the filter is rejected before hitting the DB - one expression only)
+  it("should not fetch when the filter contains a semicolon", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    mockFetch.mockClear();
+    await user.type(
+      screen.getByRole("textbox", { name: /filter/i }),
+      "1=1); DROP TABLE x; --",
+    );
+    await user.keyboard("{Enter}");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockToast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/one .*expression|semicolon/i),
+    );
   });
 });

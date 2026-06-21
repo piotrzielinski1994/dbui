@@ -64,7 +64,11 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > replace that database's sidebar tables with the live catalog. Status shows as a toast + a coloured
 > dot on the database row. A database lists its tables only after a successful connect
 > (the live catalog); table leaves are never shown before connecting. Opening a table of a
-> connected database fetches its real content (first 200 rows, NULL shown as `[NULL]`). The
+> connected database fetches its real content (first 200 rows, NULL shown as `[NULL]`); each
+> column header shows its type plus `PK`/`NN` markers, clicking a header sorts the whole table
+> server-side (asc/desc/none), and a **Load more** footer pages in the next rows. The status bar
+> shows `<loaded> of <total>` rows (unbounded count) with an editable page-size field. Both grids
+> have **Copy CSV**/**Copy JSON** footer buttons; the SQL result sorts client-side. The
 > SQL tab is live: edit SQL and Run it
 > (or Cmd/Ctrl+Enter) against the connected database - row-returning queries show a result
 > grid, other statements report rows-affected. The editor|results split flips between

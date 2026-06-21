@@ -259,4 +259,60 @@ describe("SqlTab run", () => {
     expect(historyList).toHaveTextContent("ERR");
     expect(historyList).toHaveTextContent("boom");
   });
+
+  // behavior (AC-006: clicking a result header sorts the rows in memory, no re-run)
+  it("should sort the result rows client-side when a header is clicked", async () => {
+    const user = userEvent.setup();
+    mockExecute.mockResolvedValue({
+      columns: ["id", "name"],
+      rows: [
+        ["3", "Cleo"],
+        ["1", "Ada"],
+        ["2", "Bob"],
+      ],
+      rowsAffected: 3,
+      returnsRows: true,
+      message: "SELECT 3",
+    });
+    renderSql({ connected: true });
+
+    await user.click(screen.getByRole("button", { name: /run/i }));
+    await screen.findByText("Ada");
+
+    mockExecute.mockClear();
+    await user.click(screen.getByRole("columnheader", { name: "id" }));
+
+    // rows reordered ascending by id without another executeSql
+    await waitFor(() => {
+      const cells = screen.getAllByRole("cell");
+      expect(cells[0]).toHaveTextContent("1");
+    });
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
+  // behavior (AC-008, TC-010: copy the result rows to the clipboard as CSV)
+  it("should copy the result rows to the clipboard as CSV", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockExecute.mockResolvedValue({
+      columns: ["id", "name"],
+      rows: [["1", "Ada"]],
+      rowsAffected: 1,
+      returnsRows: true,
+      message: "SELECT 1",
+    });
+    renderSql({ connected: true });
+
+    await user.click(screen.getByRole("button", { name: /run/i }));
+    await screen.findByText("Ada");
+    await user.click(screen.getByRole("button", { name: /copy csv/i }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("id,name\n1,Ada");
+    });
+  });
 });

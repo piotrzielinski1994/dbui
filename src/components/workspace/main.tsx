@@ -10,14 +10,9 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 export function Main() {
   const { isConsoleVisible, layouts, saveLayout } = useWorkspace();
 
-  if (!isConsoleVisible) {
-    return (
-      <div className="h-full">
-        <Content />
-      </div>
-    );
-  }
-
+  // Same reasoning as WorkspaceLayout: the group + content panel are rendered unconditionally with
+  // stable keys/order so toggling the console (Cmd+J) only adds/removes the console panel and never
+  // remounts <Content/> (the open table grid). A bare-<div> fallback would remount it every toggle.
   return (
     <ResizablePanelGroup
       orientation="vertical"
@@ -25,13 +20,22 @@ export function Main() {
       defaultLayout={layouts.main}
       onLayoutChanged={(layout) => saveLayout("main", layout)}
     >
-      <ResizablePanel id="content" defaultSize="75%" minSize="30%">
+      <ResizablePanel key="content" id="content" defaultSize="75%" minSize="30%">
         <Content />
       </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel id="console" defaultSize="25%" minSize="10%">
-        <Console />
-      </ResizablePanel>
+      {isConsoleVisible
+        ? [
+            <ResizableHandle key="handle" />,
+            <ResizablePanel
+              key="console"
+              id="console"
+              defaultSize="25%"
+              minSize="10%"
+            >
+              <Console />
+            </ResizablePanel>,
+          ]
+        : null}
     </ResizablePanelGroup>
   );
 }

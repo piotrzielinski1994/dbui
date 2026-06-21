@@ -31,12 +31,12 @@ export function Console() {
   return (
     <section
       aria-label="Console"
-      className="flex h-full flex-col bg-muted/30 font-mono text-xs"
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/30 font-mono text-xs"
     >
       <div
         role="tablist"
         aria-label="Console panels"
-        className="flex items-stretch border-b"
+        className="flex shrink-0 items-stretch border-b"
       >
         <ConsoleTabButton
           isActive={tab === "log"}
@@ -58,7 +58,7 @@ export function Console() {
         </ConsoleTabButton>
       </div>
       {tab === "log" ? (
-        <ScrollArea key="log" className="flex-1">
+        <ScrollArea key="log" className="min-h-0 flex-1">
           <ul className="p-2">
             {consoleLines.map((line, index) => (
               <li key={index} className="py-0.5 text-muted-foreground">
@@ -68,7 +68,7 @@ export function Console() {
           </ul>
         </ScrollArea>
       ) : tab === "changes" ? (
-        <ScrollArea key="changes" className="flex-1">
+        <ScrollArea key="changes" className="min-h-0 flex-1">
           {pendingCount === 0 ? (
             <p className="p-3 text-muted-foreground">No pending changes.</p>
           ) : (
@@ -95,7 +95,7 @@ export function Console() {
           )}
         </ScrollArea>
       ) : (
-        <ScrollArea key="history" className="flex-1">
+        <ScrollArea key="history" className="min-h-0 flex-1">
           {history.length === 0 ? (
             <p className="p-3 text-muted-foreground">
               No queries run yet this session.

@@ -69,7 +69,10 @@ const tree: TreeNode[] = [
 ];
 
 const productRows: TableRows = {
-  columns: ["id", "name"],
+  columns: [
+    { name: "id", dataType: "int4", nullable: false, isPrimaryKey: true },
+    { name: "name", dataType: "text", nullable: true, isPrimaryKey: false },
+  ],
   rows: [["1", "Ada"]],
   primaryKey: "id",
 };

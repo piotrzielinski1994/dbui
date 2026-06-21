@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectionConfig,
+  Sort,
   TableRows,
 } from "@/lib/workspace/model";
 
@@ -15,9 +16,24 @@ export function connectDatabase(config: ConnectionConfig): Promise<string[]> {
 export function fetchTable(
   config: ConnectionConfig,
   table: string,
-  filter?: string,
+  opts?: { limit?: number; offset?: number; filter?: string; sort?: Sort | null },
 ): Promise<TableRows> {
   return invoke<TableRows>("fetch_table", {
+    config,
+    table,
+    limit: opts?.limit ?? null,
+    offset: opts?.offset ?? 0,
+    filter: opts?.filter ?? null,
+    sort: opts?.sort ?? null,
+  });
+}
+
+export function countTable(
+  config: ConnectionConfig,
+  table: string,
+  filter?: string,
+): Promise<number> {
+  return invoke<number>("count_table", {
     config,
     table,
     filter: filter ?? null,

@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -337,6 +338,40 @@ export function WorkspaceProvider({
   );
   const [isConsoleVisible, setIsConsoleVisible] = useState(!initialConsoleHidden);
 
+  // These actions are consumed by the heavy, memoized DataGrid (via table-card's commitEdit). They
+  // use functional setters only, so they have no reactive deps - pinning their identity with
+  // useCallback([]) keeps commitEdit (and thus the grid's props) stable across unrelated context
+  // rebuilds (e.g. a sidebar/console toggle), so the 200-row grid render is skipped, not repeated.
+  const upsertPendingEdit = useCallback(
+    (edit: PendingEdit) =>
+      setPendingEdits((current) => [
+        ...current.filter((existing) => existing.id !== edit.id),
+        edit,
+      ]),
+    [],
+  );
+  const discardPendingEdit = useCallback(
+    (id: string) =>
+      setPendingEdits((current) => current.filter((edit) => edit.id !== id)),
+    [],
+  );
+  const discardPendingEditsForTable = useCallback(
+    (tableId: string) =>
+      setPendingEdits((current) =>
+        current.filter((edit) => edit.tableId !== tableId),
+      ),
+    [],
+  );
+  const addHistoryEntry = useCallback(
+    (entry: HistoryEntry) =>
+      setHistory((current) =>
+        current.some((existing) => existing.id === entry.id)
+          ? current
+          : [entry, ...current].slice(0, 100),
+      ),
+    [],
+  );
+
   const value = useMemo<WorkspaceContextValue>(() => {
     const openNode = (id: string) => {
       if (!nodesById.has(id)) {
@@ -441,24 +476,11 @@ export function WorkspaceProvider({
           replaceDatabaseTables(current, id, tablesFromNames(id, tableNames)),
         ),
       pendingEdits,
-      upsertPendingEdit: (edit) =>
-        setPendingEdits((current) => [
-          ...current.filter((existing) => existing.id !== edit.id),
-          edit,
-        ]),
-      discardPendingEdit: (id) =>
-        setPendingEdits((current) => current.filter((edit) => edit.id !== id)),
-      discardPendingEditsForTable: (tableId) =>
-        setPendingEdits((current) =>
-          current.filter((edit) => edit.tableId !== tableId),
-        ),
+      upsertPendingEdit,
+      discardPendingEdit,
+      discardPendingEditsForTable,
       history,
-      addHistoryEntry: (entry) =>
-        setHistory((current) =>
-          current.some((existing) => existing.id === entry.id)
-            ? current
-            : [entry, ...current].slice(0, 100),
-        ),
+      addHistoryEntry,
       splitOrientation,
       toggleSplitOrientation: () =>
         setSplitOrientation((current) =>
@@ -489,6 +511,10 @@ export function WorkspaceProvider({
     layouts,
     isSidebarVisible,
     isConsoleVisible,
+    upsertPendingEdit,
+    discardPendingEdit,
+    discardPendingEditsForTable,
+    addHistoryEntry,
   ]);
 
   useEffect(() => {

@@ -20,10 +20,22 @@ export type ConnectionConfig = NetworkConnection | SqliteConnection;
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
+export type TableColumn = {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+};
+
 export type TableRows = {
-  columns: string[];
+  columns: TableColumn[];
   rows: (string | null)[][];
   primaryKey: string | null;
+};
+
+export type Sort = {
+  column: string;
+  descending: boolean;
 };
 
 export type ResultColumn = { name: string; type: string };
