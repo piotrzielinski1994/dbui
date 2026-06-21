@@ -3,8 +3,14 @@ import { cn } from "@/lib/utils";
 import { Database, Plus, Table, X } from "lucide-react";
 
 export function ContentHeader() {
-  const { openTabIds, activeTabId, nodesById, setActiveTab, closeTab, newTab } =
-    useWorkspace();
+  const {
+    openTabIds,
+    activeTabId,
+    nodesById,
+    setActiveTab,
+    closeTab,
+    addDatabase,
+  } = useWorkspace();
 
   return (
     <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b bg-muted/30">
@@ -57,8 +63,8 @@ export function ContentHeader() {
       </div>
       <button
         type="button"
-        aria-label="New tab"
-        onClick={newTab}
+        aria-label="New database"
+        onClick={addDatabase}
         className="shrink-0 px-2 py-1.5 text-muted-foreground hover:text-foreground"
       >
         <Plus className="size-4" />

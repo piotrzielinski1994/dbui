@@ -15,9 +15,14 @@ import {
 type CommandPaletteProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onNewFolder: () => void;
 };
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onNewFolder,
+}: CommandPaletteProps) {
   const {
     openTabIds,
     activeTabId,
@@ -27,6 +32,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     closeTab,
     closeAllTabs,
     newTab,
+    addDatabase,
     toggleSplitOrientation,
     toggleSidebar,
     toggleConsole,
@@ -50,6 +56,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   };
 
   const handlers: Record<PaletteCommandId, () => void> = {
+    "new-database": addDatabase,
+    "new-folder": onNewFolder,
     "close-tab": closeActiveTab,
     "close-all-tabs": closeAllTabs,
     "next-tab": () => cycleTab(1),

@@ -188,6 +188,11 @@ function LiveTable({
   >({
     queryKey: ["table-rows", tableId, filter ?? ""],
     queryFn: () => fetchTable(config, tableName, filter),
+    // Switching tabs unmounts/remounts this card; without a stale time the cached
+    // rows would refetch on every return. A new filter uses a different queryKey
+    // and Save explicitly invalidates, so the only thing this suppresses is the
+    // pointless re-fetch (and duplicate history row) when revisiting the tab.
+    staleTime: Infinity,
   });
 
   const sql = fetchSql(config.engine, tableName, filter);

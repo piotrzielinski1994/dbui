@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   PANE_TABS_LIST,
@@ -69,6 +69,10 @@ function useAutoConnect() {
   const { connect } = useConnectionActions();
   const id = activeNode?.kind === "database" ? activeNode.id : null;
   const status = id ? connectionStatus.get(id) : undefined;
+  // setConnectionStatus is async, so React StrictMode's double-invoked effect (or
+  // a fast re-render) would see the same undefined status twice and connect twice.
+  // Track the ids we've already kicked off this mount to fire exactly once.
+  const attemptedIds = useRef(new Set<string>());
 
   useEffect(() => {
     if (!id || !activeNode || activeNode.kind !== "database") {
@@ -78,9 +82,10 @@ function useAutoConnect() {
     // sets "idle", a failure sets "error" - neither should auto-reconnect. A
     // restored connection has a config in the map but no status yet, so it must
     // still fetch its live catalog here (the saved config is not a live session).
-    if (status !== undefined) {
+    if (status !== undefined || attemptedIds.current.has(id)) {
       return;
     }
+    attemptedIds.current.add(id);
     // Prefer the restored/edited config over the node's seed defaults.
     const saved = connections.get(id);
     connect(

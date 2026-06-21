@@ -1,6 +1,14 @@
 import { ChevronDown, ChevronRight, Database, Table } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { useConnectionActions } from "@/components/workspace/use-connection";
+import { useRequestDelete } from "@/components/workspace/delete-request-context";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import type {
   ConnectionStatus,
   DatabaseNode,
@@ -11,22 +19,35 @@ import type {
 
 function FolderRow({ node, depth }: { node: FolderNode; depth: number }) {
   const { expandedIds, toggleExpand } = useWorkspace();
+  const requestDelete = useRequestDelete();
   const isExpanded = expandedIds.has(node.id);
   const Chevron = isExpanded ? ChevronDown : ChevronRight;
 
   return (
     <li>
-      <div
-        role="treeitem"
-        aria-expanded={isExpanded}
-        tabIndex={0}
-        onClick={() => toggleExpand(node.id)}
-        style={{ paddingLeft: `${depth * 14 + 6}px` }}
-        className="flex cursor-pointer items-center gap-1 py-1 pr-2 text-[13px] hover:bg-accent"
-      >
-        <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{node.name}</span>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            role="treeitem"
+            aria-expanded={isExpanded}
+            tabIndex={0}
+            onClick={() => toggleExpand(node.id)}
+            style={{ paddingLeft: `${depth * 14 + 6}px` }}
+            className="flex cursor-pointer items-center gap-1 py-1 pr-2 text-[13px] hover:bg-accent"
+          >
+            <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{node.name}</span>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={() => requestDelete(node)}
+          >
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {isExpanded ? (
         <ul role="group">
           {node.children.map((child) => (
@@ -44,51 +65,90 @@ const STATUS_DOT_COLOR: Partial<Record<ConnectionStatus, string>> = {
 };
 
 function DatabaseRow({ node, depth }: { node: DatabaseNode; depth: number }) {
-  const { expandedIds, activeTabId, toggleExpand, openNode, connectionStatus } =
-    useWorkspace();
+  const {
+    expandedIds,
+    activeTabId,
+    toggleExpand,
+    openNode,
+    connectionStatus,
+    connections,
+  } = useWorkspace();
+  const { connect, disconnect } = useConnectionActions();
+  const requestDelete = useRequestDelete();
   const isExpanded = expandedIds.has(node.id);
   const isSelected = activeTabId === node.id;
   const Chevron = isExpanded ? ChevronDown : ChevronRight;
   const status = connectionStatus.get(node.id) ?? "idle";
   const dotColor = STATUS_DOT_COLOR[status];
   const isConnected = status === "connected";
+  const hasConnection = connections.has(node.id);
+
+  const toggleConnection = () => {
+    if (hasConnection) {
+      disconnect(node.id);
+      return;
+    }
+    connect(node.id, {
+      engine: node.engine,
+      host: node.host,
+      port: node.port,
+      database: node.database,
+      user: node.user,
+      password: node.password,
+    });
+  };
 
   return (
     <li>
-      <div
-        role="treeitem"
-        aria-expanded={isExpanded}
-        aria-selected={isSelected}
-        aria-label={node.name}
-        tabIndex={0}
-        onClick={() => openNode(node.id)}
-        style={{ paddingLeft: `${depth * 14 + 6}px` }}
-        className={cn(
-          "flex cursor-pointer items-center gap-1 py-1 pr-2 text-[13px] hover:bg-accent",
-          isSelected && "bg-accent",
-        )}
-      >
-        <button
-          type="button"
-          aria-label={`Toggle ${node.name} tables`}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleExpand(node.id);
-          }}
-          className="flex shrink-0 items-center rounded-sm text-muted-foreground hover:text-foreground"
-        >
-          <Chevron className="size-3.5" />
-        </button>
-        <Database className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{node.name}</span>
-        {dotColor ? (
-          <span
-            role="img"
-            aria-label={`${node.name} ${status}`}
-            className={cn("ml-auto size-2 shrink-0 rounded-full", dotColor)}
-          />
-        ) : null}
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            role="treeitem"
+            aria-expanded={isExpanded}
+            aria-selected={isSelected}
+            aria-label={node.name}
+            tabIndex={0}
+            onClick={() => openNode(node.id)}
+            style={{ paddingLeft: `${depth * 14 + 6}px` }}
+            className={cn(
+              "flex cursor-pointer items-center gap-1 py-1 pr-2 text-[13px] hover:bg-accent",
+              isSelected && "bg-accent",
+            )}
+          >
+            <button
+              type="button"
+              aria-label={`Toggle ${node.name} tables`}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleExpand(node.id);
+              }}
+              className="flex shrink-0 items-center rounded-sm text-muted-foreground hover:text-foreground"
+            >
+              <Chevron className="size-3.5" />
+            </button>
+            <Database className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{node.name}</span>
+            {dotColor ? (
+              <span
+                role="img"
+                aria-label={`${node.name} ${status}`}
+                className={cn("ml-auto size-2 shrink-0 rounded-full", dotColor)}
+              />
+            ) : null}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={toggleConnection}>
+            {hasConnection ? "Disconnect" : "Connect"}
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={() => requestDelete(node)}
+          >
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {isExpanded && isConnected ? (
         <ul role="group">
           {node.tables.map((table) => (

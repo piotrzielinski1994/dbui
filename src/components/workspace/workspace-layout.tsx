@@ -7,11 +7,13 @@ import {
 import { Sidebar } from "@/components/workspace/sidebar";
 import { Main } from "@/components/workspace/main";
 import { CommandPalette } from "@/components/workspace/command-palette";
+import { NewFolderDialog } from "@/components/workspace/new-folder-dialog";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { Toaster } from "@/components/ui/sonner";
 
 export function WorkspaceLayout() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false);
   const {
     activeNode,
     activeDatabaseTab,
@@ -19,6 +21,7 @@ export function WorkspaceLayout() {
     isSidebarVisible,
     toggleSidebar,
     toggleConsole,
+    addDatabase,
     layouts,
     saveLayout,
   } = useWorkspace();
@@ -45,6 +48,15 @@ export function WorkspaceLayout() {
         toggleConsole();
         return;
       }
+      if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          setIsFolderDialogOpen(true);
+          return;
+        }
+        addDatabase();
+        return;
+      }
       if (event.key === "\\" && isSplitView) {
         event.preventDefault();
         toggleSplitOrientation();
@@ -52,7 +64,13 @@ export function WorkspaceLayout() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isSplitView, toggleSplitOrientation, toggleSidebar, toggleConsole]);
+  }, [
+    isSplitView,
+    toggleSplitOrientation,
+    toggleSidebar,
+    toggleConsole,
+    addDatabase,
+  ]);
 
   return (
     <>
@@ -81,7 +99,15 @@ export function WorkspaceLayout() {
           <Main />
         </div>
       )}
-      <CommandPalette open={isPaletteOpen} onOpenChange={setIsPaletteOpen} />
+      <CommandPalette
+        open={isPaletteOpen}
+        onOpenChange={setIsPaletteOpen}
+        onNewFolder={() => setIsFolderDialogOpen(true)}
+      />
+      <NewFolderDialog
+        open={isFolderDialogOpen}
+        onOpenChange={setIsFolderDialogOpen}
+      />
       <Toaster />
     </>
   );

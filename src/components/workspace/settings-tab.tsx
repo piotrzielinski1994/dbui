@@ -84,7 +84,7 @@ export function SettingsTab() {
 }
 
 function ConnectionForm({ node }: { node: DatabaseNode }) {
-  const { connections, connectionStatus } = useWorkspace();
+  const { connections, connectionStatus, renameDatabase } = useWorkspace();
   const { connect, disconnect } = useConnectionActions();
   const { engine, host, port, database, user, password } = node;
   const [form, setForm] = useState<ConnectionConfig>({
@@ -109,6 +109,13 @@ function ConnectionForm({ node }: { node: DatabaseNode }) {
 
   return (
     <div className="flex max-w-md flex-col gap-3 p-3">
+      <Field label="Name" htmlFor="conn-name">
+        <Input
+          id="conn-name"
+          value={node.name}
+          onChange={(event) => renameDatabase(nodeId, event.target.value)}
+        />
+      </Field>
       <Field label="Type" htmlFor="conn-engine">
         <Select
           value={form.engine}

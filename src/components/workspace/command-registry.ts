@@ -1,4 +1,6 @@
 export type PaletteCommandId =
+  | "new-database"
+  | "new-folder"
   | "close-tab"
   | "close-all-tabs"
   | "next-tab"
@@ -24,6 +26,18 @@ const hasTabs = (state: PaletteState) => state.openTabCount >= 1;
 const hasMultipleTabs = (state: PaletteState) => state.openTabCount >= 2;
 
 export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
+  {
+    id: "new-database",
+    name: "New database",
+    hint: "Cmd/Ctrl+N",
+    when: () => true,
+  },
+  {
+    id: "new-folder",
+    name: "New folder",
+    hint: "Cmd/Ctrl+Shift+N",
+    when: () => true,
+  },
   { id: "close-tab", name: "Close tab", hint: "Ctrl+W", when: hasTabs },
   { id: "close-all-tabs", name: "Close all tabs", when: hasTabs },
   { id: "next-tab", name: "Next tab", hint: "Tab", when: hasMultipleTabs },

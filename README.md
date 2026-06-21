@@ -43,7 +43,13 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 
 > The home route renders the workspace shell: a sidebar tree of databases grouped under
 > optional folders, loaded from a persisted `workspace.json` (empty on first run - the
-> sidebar shows a "No connection" state until you add a database). Each database expands
+> sidebar shows a "No connection" state until you add a database). Add a database with
+> **Cmd/Ctrl+N** (or the "New database" palette command): it appears at the tree root and opens
+> on its Settings tab, where you name it and fill the connection. Add a folder with
+> **Cmd/Ctrl+Shift+N** (or "New folder") - a one-field name dialog. Right-click a database or
+> folder row for a context menu: Connect/Disconnect (databases) and Delete (with a confirm
+> dialog; deleting a folder removes the databases inside it). The `+` button beside the tabs also
+> adds a database. Each database expands
 > (chevron) to list its tables once connected. Clicking a
 > database name opens a **database card** (sub-tabs SQL / Views / Script / Settings - the
 > SQL tab is an editable editor with a Run button, beside the result grid with its own status

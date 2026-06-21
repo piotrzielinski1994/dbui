@@ -64,6 +64,29 @@ describe("ContentHeader", () => {
     expect(screen.getByRole("button", { name: /new /i })).toBeInTheDocument();
   });
 
+  // behavior (the plus button creates a new database tab on its Settings card)
+  it("should open a new database tab on the Settings card if the plus button is clicked", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceProvider tree={[]}>
+        <ContentHeader />
+        <SidebarTree />
+      </WorkspaceProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /new /i }));
+
+    expect(
+      screen.getByRole("tab", { name: "new_database" }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("tree", { name: /navigator/i })).getByRole(
+        "treeitem",
+        { name: "new_database" },
+      ),
+    ).toBeInTheDocument();
+  });
+
   // AC-007 — behavior (close button per tab)
   it("should offer a close button per open tab", () => {
     render(

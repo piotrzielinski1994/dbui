@@ -17,6 +17,7 @@ import {
   type ConnectionConfig,
   type ConnectionStatus,
   type DatabaseNode,
+  type FolderNode,
   type TableNode,
   type TreeNode,
 } from "@/components/workspace/mock-data";
@@ -76,6 +77,10 @@ type WorkspaceContextValue = {
   closeAllTabs: () => void;
   setDatabaseTab: (tab: DatabaseTab) => void;
   newTab: () => void;
+  addDatabase: () => void;
+  addFolder: (name: string) => void;
+  renameDatabase: (id: string, name: string) => void;
+  removeNode: (id: string) => void;
   setConnectionStatus: (id: string, status: ConnectionStatus) => void;
   setConnection: (id: string, config: ConnectionConfig) => void;
   removeConnection: (id: string) => void;
@@ -158,6 +163,88 @@ function applyDatabaseConfig(
     }
     if (node.kind === "database" && node.id === databaseId) {
       return { ...node, ...config };
+    }
+    return node;
+  });
+}
+
+function newDatabaseNode(id: string): DatabaseNode {
+  return {
+    kind: "database",
+    id,
+    name: "new_database",
+    engine: "postgres",
+    host: "localhost",
+    port: 5432,
+    database: "",
+    user: "",
+    password: "",
+    tables: [],
+    views: [],
+    sql: "",
+    savedScripts: [],
+    script: "",
+    result: {
+      status: "success",
+      timeMs: 0,
+      rowCount: 0,
+      columns: [],
+      rows: [],
+      message: "",
+    },
+  };
+}
+
+function newFolderNode(id: string, name: string): FolderNode {
+  return { kind: "folder", id, name, children: [] };
+}
+
+function databaseIdsIn(node: TreeNode): string[] {
+  if (node.kind === "folder") {
+    return node.children.flatMap(databaseIdsIn);
+  }
+  if (node.kind === "database") {
+    return [node.id];
+  }
+  return [];
+}
+
+function findNode(nodes: TreeNode[], targetId: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.id === targetId) {
+      return node;
+    }
+    if (node.kind === "folder") {
+      const found = findNode(node.children, targetId);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return null;
+}
+
+function removeNodeFromTree(nodes: TreeNode[], targetId: string): TreeNode[] {
+  return nodes
+    .filter((node) => node.id !== targetId)
+    .map((node) =>
+      node.kind === "folder"
+        ? { ...node, children: removeNodeFromTree(node.children, targetId) }
+        : node,
+    );
+}
+
+function renameNode(
+  nodes: TreeNode[],
+  databaseId: string,
+  name: string,
+): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind === "folder") {
+      return { ...node, children: renameNode(node.children, databaseId, name) };
+    }
+    if (node.kind === "database" && node.id === databaseId) {
+      return { ...node, name };
     }
     return node;
   });
@@ -289,6 +376,41 @@ export function WorkspaceProvider({
       },
       setDatabaseTab: setActiveDatabaseTab,
       newTab: () => {},
+      addDatabase: () => {
+        const id = crypto.randomUUID();
+        setTree((current) => [...current, newDatabaseNode(id)]);
+        setConnectionStatusMap((current) => new Map(current).set(id, "idle"));
+        setOpenTabIds((current) =>
+          current.includes(id) ? current : [...current, id],
+        );
+        setActiveTabId(id);
+        setActiveDatabaseTab("settings");
+      },
+      addFolder: (name) =>
+        setTree((current) => [
+          ...current,
+          newFolderNode(crypto.randomUUID(), name),
+        ]),
+      renameDatabase: (id, name) =>
+        setTree((current) => renameNode(current, id, name)),
+      removeNode: (id) => {
+        const node = findNode(tree, id);
+        const removedDbIds = node ? databaseIdsIn(node) : [id];
+        setTree((current) => removeNodeFromTree(current, id));
+        removedDbIds.forEach(closeTab);
+        if (removedDbIds.length > 0) {
+          setConnectionsMap((current) => {
+            const next = new Map(current);
+            removedDbIds.forEach((dbId) => next.delete(dbId));
+            return next;
+          });
+          setConnectionStatusMap((current) => {
+            const next = new Map(current);
+            removedDbIds.forEach((dbId) => next.delete(dbId));
+            return next;
+          });
+        }
+      },
       connectionStatus,
       connections,
       setConnectionStatus: (id, status) =>
@@ -321,7 +443,11 @@ export function WorkspaceProvider({
         ),
       history,
       addHistoryEntry: (entry) =>
-        setHistory((current) => [entry, ...current].slice(0, 100)),
+        setHistory((current) =>
+          current.some((existing) => existing.id === entry.id)
+            ? current
+            : [entry, ...current].slice(0, 100),
+        ),
       splitOrientation,
       toggleSplitOrientation: () =>
         setSplitOrientation((current) =>
