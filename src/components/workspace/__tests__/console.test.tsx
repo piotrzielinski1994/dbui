@@ -120,6 +120,64 @@ describe("Console", () => {
     }
   });
 
+  // behavior (Clear on the History tab empties the query history)
+  it("should clear the query history when Clear is clicked on the History tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceProvider tree={fixtureTree} consoleLines={fixtureConsoleLines}>
+        <SeededConsole />
+      </WorkspaceProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "seed" }));
+    await user.click(screen.getByRole("tab", { name: /history/i }));
+    expect(screen.getByText(/explain analyze select from email/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /clear/i }));
+
+    expect(
+      screen.queryByText(/explain analyze select from email/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/no queries run yet/i)).toBeInTheDocument();
+  });
+
+  // behavior (Clear on the Changes tab discards every pending edit)
+  it("should discard all pending edits when Clear is clicked on the Changes tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceProvider tree={fixtureTree} consoleLines={fixtureConsoleLines}>
+        <SeededConsole />
+      </WorkspaceProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "seed" }));
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+    expect(screen.getByText(/UPDATE "product" SET "duration"/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /clear/i }));
+
+    expect(
+      screen.queryByText(/UPDATE "product" SET "duration"/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/no pending changes/i)).toBeInTheDocument();
+  });
+
+  // behavior (no Clear button when the active tab has nothing to clear)
+  it("should not show Clear on the History tab when there is no history", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceProvider tree={fixtureTree} consoleLines={fixtureConsoleLines}>
+        <Console />
+      </WorkspaceProvider>,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /history/i }));
+
+    expect(
+      screen.queryByRole("button", { name: /clear/i }),
+    ).not.toBeInTheDocument();
+  });
+
   // behavior (Changes shows ONLY pending edits, never query-history entries)
   it("should not show query-history entries in the Changes tab", async () => {
     const user = userEvent.setup();

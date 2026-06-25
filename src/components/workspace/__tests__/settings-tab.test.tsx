@@ -12,12 +12,14 @@ import type {
   QueryResult,
   TreeNode,
 } from "@/lib/workspace/model";
-import { connectDatabase } from "@/lib/tauri";
+import { connectDatabase, cancelConnect } from "@/lib/tauri";
 import { toast } from "sonner";
 
 vi.mock("@/lib/tauri", () => ({
   connectDatabase: vi.fn(),
   fetchSchema: vi.fn(() => Promise.resolve([])),
+  disconnectDatabase: vi.fn(),
+  cancelConnect: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -28,6 +30,7 @@ vi.mock("sonner", () => ({
 }));
 
 const mockConnect = vi.mocked(connectDatabase);
+const mockCancel = vi.mocked(cancelConnect);
 const mockToast = vi.mocked(toast);
 
 function renderSettings(opts?: {
@@ -166,6 +169,7 @@ describe("SettingsTab", () => {
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect).toHaveBeenCalledWith(
+      "db-admin",
       expect.objectContaining({
         engine: "postgres",
         host: "db.internal",
@@ -175,6 +179,21 @@ describe("SettingsTab", () => {
         password: "s3cr3t-pw",
       }),
     );
+  });
+
+  // behavior (a stuck connect shows Cancel; clicking it aborts via the connect-namespaced key)
+  it("should show Cancel while connecting and abort the connect when clicked", async () => {
+    const user = userEvent.setup();
+    // Never-resolving connect holds the "connecting" state so the button stays "Cancel".
+    mockConnect.mockReturnValueOnce(new Promise(() => {}));
+    renderSettings();
+
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    const cancelButton = await screen.findByRole("button", { name: /^cancel$/i });
+    await user.click(cancelButton);
+
+    expect(mockCancel).toHaveBeenCalledWith("db-admin");
   });
 
   // AC-003 - behavior (Connect sends edited values)
@@ -189,6 +208,7 @@ describe("SettingsTab", () => {
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
     expect(mockConnect).toHaveBeenCalledWith(
+      "db-admin",
       expect.objectContaining({ host: "edited.host" }),
     );
   });
@@ -226,8 +246,9 @@ describe("SettingsTab", () => {
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
-  // AC-007, TC-004 - behavior (pending state: disabled + "Connecting...")
-  it("should disable the Connect button and label it Connecting while the connect is in flight", async () => {
+  // behavior (pending state: the Connect button becomes an enabled Cancel control - the connect is
+  // abortable, not a dead "Connecting..." label)
+  it("should swap Connect for an enabled Cancel button while the connect is in flight", async () => {
     const user = userEvent.setup();
     let resolveConnect: (tables: string[]) => void = () => {};
     mockConnect.mockReturnValueOnce(
@@ -239,10 +260,11 @@ describe("SettingsTab", () => {
 
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
-    const pending = await screen.findByRole("button", {
-      name: /connecting/i,
+    const cancelButton = await screen.findByRole("button", {
+      name: /^cancel$/i,
     });
-    expect(pending).toBeDisabled();
+    expect(cancelButton).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^connect$/i })).toBeNull();
 
     resolveConnect([]);
   });
@@ -498,6 +520,7 @@ describe("SettingsTab SQLite engine", () => {
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
     expect(mockConnect).toHaveBeenCalledWith(
+      "db-local",
       expect.objectContaining({
         engine: "sqlite",
         file: "/Users/me/data/app.sqlite",

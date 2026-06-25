@@ -248,11 +248,13 @@ function TableView({
 
 function LiveTable({
   config,
+  connectionId,
   tableId,
   tableName,
   filter,
 }: {
   config: ConnectionConfig;
+  connectionId: string;
   tableId: string;
   tableName: string;
   filter: string | undefined;
@@ -282,7 +284,7 @@ function LiveTable({
   } = useInfiniteQuery<TableRows, Error>({
     queryKey: ["table-rows", tableId, filter ?? "", sortKey, pageSize],
     queryFn: ({ pageParam }) =>
-      fetchTable(config, tableName, {
+      fetchTable(connectionId, tableName, {
         filter,
         sort,
         limit: pageSize,
@@ -308,7 +310,7 @@ function LiveTable({
   // only on the filter - sort and paging don't change how many rows match.
   const { data: totalRows } = useQuery<number, Error>({
     queryKey: ["table-count", tableId, filter ?? ""],
-    queryFn: () => countTable(config, tableName, filter),
+    queryFn: () => countTable(connectionId, tableName, filter),
     staleTime: Infinity,
   });
 
@@ -640,7 +642,7 @@ function LiveTable({
       .map((edit) => ({ id: edit.id, sql: edit.sql }));
     setIsSaving(true);
     const result = await toResult(
-      applyRowMutations(config, tableName, payload),
+      applyRowMutations(connectionId, tableName, payload),
     );
     setIsSaving(false);
     if (!result.ok) {
@@ -869,9 +871,10 @@ export function TableCard() {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {isLive && config ? (
+        {isLive && config && databaseId ? (
           <LiveTable
             config={config}
+            connectionId={databaseId}
             tableId={activeNode.id}
             tableName={activeNode.name}
             filter={filter}

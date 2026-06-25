@@ -2,8 +2,211 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use sqlx::any::AnyPoolOptions;
 use sqlx::Row;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use tokio_util::sync::CancellationToken;
 
 pub const DEFAULT_ROW_LIMIT: u32 = 200;
+
+// How many connections a held pool keeps. >1 so concurrent runs (e.g. two SQL tabs, or a query
+// while a table browses) don't serialise behind a single connection.
+const POOL_MAX_CONNECTIONS: u32 = 5;
+
+// A live connection held for the lifetime of a database connection. The engine travels with the
+// pool because commands now address a connection by id and no longer re-send the config that the
+// per-engine query builders need. `AnyPool` is a cheap `Arc` clone, `DbEngine` is `Copy`, so the
+// whole struct clones out of the registry lock without holding it across an `.await`.
+#[derive(Clone)]
+pub struct HeldConnection {
+    pub pool: sqlx::AnyPool,
+    pub engine: DbEngine,
+}
+
+// Process-wide registry of held pools, keyed by database id. Opened on connect, removed + closed
+// on disconnect. Reverses the prior "Connect is stateless" model (open/close per command).
+static POOLS: LazyLock<Mutex<HashMap<String, HeldConnection>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+// Clones the held connection (pool handle + engine) out of the registry, or a clear not-connected
+// error when no pool is held for the id. Synchronous: never holds the lock across an await.
+pub fn with_pool(connection_id: &str) -> Result<HeldConnection, String> {
+    POOLS
+        .lock()
+        .unwrap()
+        .get(connection_id)
+        .cloned()
+        .ok_or_else(|| format!("not connected: no connection for id '{connection_id}'"))
+}
+
+// Cancellation token sentinel + registry, ported from the sibling `requi` repo. A run registers
+// its token keyed by request id, a guard removes it on every exit, a cancel fires it.
+pub const CANCEL_SENTINEL: &str = "__cancelled__";
+
+static CANCELS: LazyLock<Mutex<HashMap<String, CancellationToken>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+// Removes the request's token on drop so no run path leaks an entry (success, error, or cancel all
+// unwind through this).
+struct CancelGuard {
+    request_id: String,
+}
+
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        CANCELS.lock().unwrap().remove(&self.request_id);
+    }
+}
+
+// Fires the cancellation token for a request id, aborting its in-flight run at the next await
+// point. A no-op for an unknown id (already finished, or never started).
+pub async fn cancel_query(request_id: String) {
+    let token = CANCELS.lock().unwrap().get(&request_id).cloned();
+    if let Some(token) = token {
+        token.cancel();
+    }
+}
+
+// Splits a buffer into individual statements on top-level `;`, leaving a `;` inside a string
+// literal, quoted identifier, comment, or Postgres dollar-quote untouched. Each statement is
+// trimmed; blank and comment-only statements are dropped. Char-scanned with a tiny lexer state so a
+// function body full of semicolons stays one statement.
+pub fn split_sql_statements(sql: &str) -> Vec<String> {
+    let chars: Vec<char> = sql.chars().collect();
+    let length = chars.len();
+    let mut statements: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut index = 0;
+
+    while index < length {
+        let character = chars[index];
+
+        if character == '-' && chars.get(index + 1) == Some(&'-') {
+            while index < length && chars[index] != '\n' {
+                current.push(chars[index]);
+                index += 1;
+            }
+            continue;
+        }
+
+        if character == '/' && chars.get(index + 1) == Some(&'*') {
+            current.push('/');
+            current.push('*');
+            index += 2;
+            while index < length {
+                if chars[index] == '*' && chars.get(index + 1) == Some(&'/') {
+                    current.push('*');
+                    current.push('/');
+                    index += 2;
+                    break;
+                }
+                current.push(chars[index]);
+                index += 1;
+            }
+            continue;
+        }
+
+        if character == '\'' || character == '"' {
+            index = consume_quoted(&chars, index, character, &mut current);
+            continue;
+        }
+
+        if character == '`' {
+            current.push('`');
+            index += 1;
+            while index < length {
+                current.push(chars[index]);
+                if chars[index] == '`' {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+
+        if character == '$' {
+            if let Some(tag_length) = dollar_tag_length(&chars, index) {
+                let tag = &chars[index..index + tag_length];
+                for offset in 0..tag_length {
+                    current.push(chars[index + offset]);
+                }
+                index += tag_length;
+                while index < length {
+                    if matches_at(&chars, index, tag) {
+                        for character in tag {
+                            current.push(*character);
+                        }
+                        index += tag.len();
+                        break;
+                    }
+                    current.push(chars[index]);
+                    index += 1;
+                }
+                continue;
+            }
+        }
+
+        if character == ';' {
+            statements.push(current.trim().to_string());
+            current.clear();
+            index += 1;
+            continue;
+        }
+
+        current.push(character);
+        index += 1;
+    }
+
+    statements.push(current.trim().to_string());
+    statements
+        .into_iter()
+        .filter(|statement| !strip_leading_noise(statement).trim().is_empty())
+        .collect()
+}
+
+// Consumes a single- or double-quoted run starting at the opening quote, pushing it verbatim into
+// `current`, and returns the index just past the closing quote. A doubled quote (`''` / `""`) is an
+// escaped quote, not a terminator.
+fn consume_quoted(chars: &[char], start: usize, quote: char, current: &mut String) -> usize {
+    let length = chars.len();
+    current.push(quote);
+    let mut index = start + 1;
+    while index < length {
+        current.push(chars[index]);
+        if chars[index] == quote {
+            if chars.get(index + 1) == Some(&quote) {
+                current.push(quote);
+                index += 2;
+                continue;
+            }
+            return index + 1;
+        }
+        index += 1;
+    }
+    index
+}
+
+// If a `$` at `start` opens a Postgres dollar-quote tag (`$$` or `$tag$` with an identifier tag),
+// returns the tag length including both `$`. Otherwise None (e.g. a `$1` placeholder).
+fn dollar_tag_length(chars: &[char], start: usize) -> Option<usize> {
+    let mut index = start + 1;
+    while index < chars.len() {
+        let character = chars[index];
+        if character == '$' {
+            return Some(index - start + 1);
+        }
+        if character.is_alphanumeric() || character == '_' {
+            index += 1;
+            continue;
+        }
+        return None;
+    }
+    None
+}
+
+fn matches_at(chars: &[char], position: usize, needle: &[char]) -> bool {
+    position + needle.len() <= chars.len() && chars[position..position + needle.len()] == *needle
+}
 
 const CREDENTIAL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -558,6 +761,9 @@ fn parse_json_rows(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryOutcome {
+    // The single statement this outcome is for (after splitting a multi-statement buffer), so the
+    // frontend logs each statement to History on its own rather than repeating the whole buffer.
+    pub statement: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Option<String>>>,
     pub rows_affected: u64,
@@ -565,31 +771,81 @@ pub struct QueryOutcome {
     pub message: String,
 }
 
+// Command-facing SQL execution over a held pool. Splits the buffer into statements, runs them in
+// order on ONE acquired connection (so a user-written BEGIN/COMMIT spans them), and returns one
+// outcome per statement. Cancellable by `request_id`: a concurrent `cancel_query` aborts the batch
+// at the next await point and resolves to the cancel sentinel. The guard removes the token on every
+// exit. An empty/comment-only buffer yields zero statements -> an empty result, no DB round-trip.
 pub async fn run_query(
-    config: ConnectionConfig,
+    connection_id: String,
     sql: String,
     limit: u32,
-) -> Result<QueryOutcome, String> {
-    let engine = config.engine();
-    let pool = AnyPoolOptions::new()
-        .max_connections(1)
-        .connect(&build_url(&config))
-        .await
-        .map_err(|error| error.to_string())?;
+    request_id: String,
+) -> Result<Vec<QueryOutcome>, String> {
+    let held = with_pool(&connection_id)?;
 
-    let outcome = match engine {
-        DbEngine::Postgres => run_query_postgres(&pool, &sql, limit).await,
-        // SQLite's Any type-describe handles `prepare().columns()` without Postgres's
-        // exotic-type failure, so it shares MySQL's prepared path.
-        DbEngine::Mysql | DbEngine::Sqlite => run_query_prepared(engine, &pool, &sql, limit).await,
+    let token = CancellationToken::new();
+    CANCELS
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), token.clone());
+    let _guard = CancelGuard {
+        request_id: request_id.clone(),
     };
 
-    pool.close().await;
-    outcome
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err(CANCEL_SENTINEL.to_string()),
+        result = run_query_batch(&held, &sql, limit) => result,
+    }
+}
+
+// Runs each split statement in order on a single connection acquired from the held pool, stopping
+// at (and returning) the first error so a failed statement aborts the batch. Earlier statements
+// stay applied unless the user wrapped them in a transaction.
+async fn run_query_batch(
+    held: &HeldConnection,
+    sql: &str,
+    limit: u32,
+) -> Result<Vec<QueryOutcome>, String> {
+    let statements = split_sql_statements(sql);
+    if statements.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut connection = held
+        .pool
+        .acquire()
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut outcomes = Vec::with_capacity(statements.len());
+    for statement in &statements {
+        let mut outcome = run_one_statement(held.engine, &mut connection, statement, limit).await?;
+        outcome.statement = statement.clone();
+        outcomes.push(outcome);
+    }
+    Ok(outcomes)
+}
+
+// Dispatches a single statement to the per-engine runner. Postgres avoids preparing arbitrary SQL
+// (its Any type-describe fails on native types); MySQL/SQLite share the prepared path.
+async fn run_one_statement(
+    engine: DbEngine,
+    connection: &mut sqlx::AnyConnection,
+    sql: &str,
+    limit: u32,
+) -> Result<QueryOutcome, String> {
+    match engine {
+        DbEngine::Postgres => run_query_postgres(connection, sql, limit).await,
+        DbEngine::Mysql | DbEngine::Sqlite => {
+            run_query_prepared(engine, connection, sql, limit).await
+        }
+    }
 }
 
 fn non_row_outcome(affected: u64) -> QueryOutcome {
     QueryOutcome {
+        statement: String::new(),
         columns: Vec::new(),
         rows: Vec::new(),
         rows_affected: affected,
@@ -599,14 +855,14 @@ fn non_row_outcome(affected: u64) -> QueryOutcome {
 }
 
 async fn run_query_postgres(
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     sql: &str,
     limit: u32,
 ) -> Result<QueryOutcome, String> {
     use sqlx::Executor;
 
     if !is_row_returning(sql) {
-        let result = pool
+        let result = (&mut *connection)
             .execute(sql.trim().trim_end_matches(';'))
             .await
             .map_err(|error| error.to_string())?;
@@ -617,12 +873,12 @@ async fn run_query_postgres(
     // row_to_json. Their output columns are already text (QUERY PLAN, setting), which the Any
     // driver decodes directly - fetch as-is.
     if !is_subquery_wrappable(sql) {
-        return fetch_plain_text_rows(pool, sql.trim().trim_end_matches(';')).await;
+        return fetch_plain_text_rows(connection, sql.trim().trim_end_matches(';')).await;
     }
 
     let wrapped = wrap_select_as_json(sql, limit);
     let data_rows = sqlx::query(&wrapped)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
     let json_rows: Vec<String> = data_rows
@@ -635,7 +891,7 @@ async fn run_query_postgres(
     // so the result grid still shows the table's column headers (matching the table card).
     if columns.is_empty() {
         let probe_rows = sqlx::query(&wrap_columns_probe(sql))
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .map_err(|error| error.to_string())?;
         let probe_json: Vec<String> = probe_rows
@@ -647,6 +903,7 @@ async fn run_query_postgres(
 
     let count = rows.len();
     Ok(QueryOutcome {
+        statement: String::new(),
         columns,
         rows,
         rows_affected: count as u64,
@@ -657,11 +914,14 @@ async fn run_query_postgres(
 
 // Fetches a statement whose result columns are already Any-decodable text (EXPLAIN, SHOW).
 // Column names come from the first row's metadata; every cell reads as Option<String>.
-async fn fetch_plain_text_rows(pool: &sqlx::AnyPool, sql: &str) -> Result<QueryOutcome, String> {
+async fn fetch_plain_text_rows(
+    connection: &mut sqlx::AnyConnection,
+    sql: &str,
+) -> Result<QueryOutcome, String> {
     use sqlx::{Column, Row};
 
     let data_rows = sqlx::query(sql)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
 
@@ -686,6 +946,7 @@ async fn fetch_plain_text_rows(pool: &sqlx::AnyPool, sql: &str) -> Result<QueryO
 
     let count = rows.len();
     Ok(QueryOutcome {
+        statement: String::new(),
         columns,
         rows,
         rows_affected: count as u64,
@@ -700,13 +961,13 @@ async fn fetch_plain_text_rows(pool: &sqlx::AnyPool, sql: &str) -> Result<QueryO
 // types) and uses run_query_postgres instead.
 async fn run_query_prepared(
     engine: DbEngine,
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     sql: &str,
     limit: u32,
 ) -> Result<QueryOutcome, String> {
     use sqlx::{Column, Executor, Statement};
 
-    let prepared = pool
+    let prepared = (&mut *connection)
         .prepare(sql.trim().trim_end_matches(';'))
         .await
         .map_err(|error| error.to_string())?;
@@ -717,7 +978,7 @@ async fn run_query_prepared(
         .collect();
 
     if columns.is_empty() {
-        let result = pool
+        let result = (&mut *connection)
             .execute(sql.trim().trim_end_matches(';'))
             .await
             .map_err(|error| error.to_string())?;
@@ -726,7 +987,7 @@ async fn run_query_prepared(
 
     let wrapped = wrap_select_as_text(engine, sql, &columns, limit);
     let data_rows = sqlx::query(&wrapped)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
     let rows: Vec<Vec<Option<String>>> = data_rows
@@ -739,6 +1000,7 @@ async fn run_query_prepared(
         .collect();
     let count = rows.len();
     Ok(QueryOutcome {
+        statement: String::new(),
         columns,
         rows,
         rows_affected: count as u64,
@@ -747,21 +1009,73 @@ async fn run_query_prepared(
     })
 }
 
-pub async fn list_tables(config: ConnectionConfig) -> Result<Vec<String>, String> {
+// Opens a pool for the connection, stores it in the registry keyed by `connection_id`, and returns
+// the table catalog. Reconnecting the same id replaces (and closes) any prior held pool. This is
+// the only command that takes `config` - subsequent commands address the held pool by id.
+pub async fn connect_database(
+    connection_id: String,
+    config: ConnectionConfig,
+) -> Result<Vec<String>, String> {
+    // The connect is cancellable like a query: its token lives under a `connect:` key so the
+    // Settings "Cancel" button (cancel_query) can abort a stuck connect without colliding with a
+    // query request id. The guard removes the token on every exit.
+    let cancel_key = connect_cancel_key(&connection_id);
+    let token = CancellationToken::new();
+    CANCELS
+        .lock()
+        .unwrap()
+        .insert(cancel_key.clone(), token.clone());
+    let _guard = CancelGuard {
+        request_id: cancel_key,
+    };
+
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err(CANCEL_SENTINEL.to_string()),
+        result = open_and_catalog(connection_id, config) => result,
+    }
+}
+
+// Derives the cancel-registry key for a connect, namespaced so it can never collide with a query
+// request id. The frontend builds the same key to cancel an in-flight connect.
+pub fn connect_cancel_key(connection_id: &str) -> String {
+    format!("connect:{connection_id}")
+}
+
+// Opens a fail-fast pool, reads the catalog, and stores the held connection. Split out so the
+// cancel select! above wraps the whole open-and-catalog future.
+async fn open_and_catalog(
+    connection_id: String,
+    config: ConnectionConfig,
+) -> Result<Vec<String>, String> {
+    let engine = config.engine();
     let pool = AnyPoolOptions::new()
-        .max_connections(1)
+        .max_connections(POOL_MAX_CONNECTIONS)
+        // Fail fast instead of hanging on sqlx's ~30s default when the host/port is wrong.
+        .acquire_timeout(std::time::Duration::from_secs(10))
         .connect(&build_url(&config))
         .await
         .map_err(|error| error.to_string())?;
 
-    let rows = sqlx::query(catalog_query(config.engine()))
+    let rows = sqlx::query(catalog_query(engine))
         .fetch_all(&pool)
         .await
         .map_err(|error| error.to_string());
 
-    pool.close().await;
+    if let Err(error) = rows {
+        pool.close().await;
+        return Err(error);
+    }
 
-    rows?
+    let previous = POOLS
+        .lock()
+        .unwrap()
+        .insert(connection_id, HeldConnection { pool, engine });
+    if let Some(previous) = previous {
+        previous.pool.close().await;
+    }
+
+    rows.expect("error returned above")
         .iter()
         .map(|row| {
             row.try_get::<String, _>(0)
@@ -770,22 +1084,21 @@ pub async fn list_tables(config: ConnectionConfig) -> Result<Vec<String>, String
         .collect()
 }
 
-pub async fn fetch_schema(config: ConnectionConfig) -> Result<Vec<TableSchema>, String> {
-    let engine = config.engine();
-    let pool = AnyPoolOptions::new()
-        .max_connections(1)
-        .connect(&build_url(&config))
+// Closes and removes the held pool for a connection id. A no-op for an unknown id.
+pub async fn disconnect_database(connection_id: String) {
+    let held = POOLS.lock().unwrap().remove(&connection_id);
+    if let Some(held) = held {
+        held.pool.close().await;
+    }
+}
+
+pub async fn fetch_schema(connection_id: String) -> Result<Vec<TableSchema>, String> {
+    let held = with_pool(&connection_id)?;
+
+    let triples = sqlx::query(schema_query(held.engine))
+        .fetch_all(&held.pool)
         .await
-        .map_err(|error| error.to_string())?;
-
-    let rows = sqlx::query(schema_query(engine))
-        .fetch_all(&pool)
-        .await
-        .map_err(|error| error.to_string());
-
-    pool.close().await;
-
-    let triples = rows?
+        .map_err(|error| error.to_string())?
         .iter()
         .map(|row| {
             Ok((
@@ -826,54 +1139,40 @@ fn group_schema(triples: Vec<(String, String, String)>) -> Vec<TableSchema> {
 }
 
 pub async fn count_table_rows(
-    config: ConnectionConfig,
+    connection_id: String,
     table: String,
     filter: Option<String>,
 ) -> Result<i64, String> {
-    let engine = config.engine();
-    let pool = AnyPoolOptions::new()
-        .max_connections(1)
-        .connect(&build_url(&config))
-        .await
-        .map_err(|error| error.to_string())?;
+    let held = with_pool(&connection_id)?;
 
-    let row = sqlx::query(&build_count_query(engine, &table, filter.as_deref()))
-        .fetch_one(&pool)
+    sqlx::query(&build_count_query(held.engine, &table, filter.as_deref()))
+        .fetch_one(&held.pool)
         .await
-        .map_err(|error| error.to_string());
-
-    pool.close().await;
-    row?.try_get::<i64, _>(0).map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
+        .try_get::<i64, _>(0)
+        .map_err(|error| error.to_string())
 }
 
 pub async fn fetch_table_rows(
-    config: ConnectionConfig,
+    connection_id: String,
     table: String,
     limit: u32,
     offset: u32,
     filter: Option<String>,
     sort: Option<Sort>,
 ) -> Result<TableRows, String> {
-    let engine = config.engine();
-    let pool = AnyPoolOptions::new()
-        .max_connections(1)
-        .connect(&build_url(&config))
-        .await
-        .map_err(|error| error.to_string())?;
+    let held = with_pool(&connection_id)?;
 
-    let result = read_table_rows(
-        &pool,
-        engine,
+    read_table_rows(
+        &held.pool,
+        held.engine,
         &table,
         limit,
         offset,
         filter.as_deref(),
         sort.as_ref(),
     )
-    .await;
-
-    pool.close().await;
-    result
+    .await
 }
 
 async fn read_table_rows(
@@ -1062,21 +1361,12 @@ fn assemble_columns(
 }
 
 pub async fn apply_row_mutations(
-    config: ConnectionConfig,
+    connection_id: String,
     table: String,
     mutations: Vec<RowMutation>,
 ) -> Result<u64, String> {
-    let engine = config.engine();
-    let pool = AnyPoolOptions::new()
-        .max_connections(1)
-        .connect(&build_url(&config))
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let result = apply_mutations(&pool, engine, &table, &mutations).await;
-
-    pool.close().await;
-    result
+    let held = with_pool(&connection_id)?;
+    apply_mutations(&held.pool, held.engine, &table, &mutations).await
 }
 
 async fn apply_mutations(
@@ -1181,11 +1471,12 @@ fn build_mutation(
 mod tests {
     use super::{
         assemble_columns, build_count_query, build_delete_query, build_insert_query,
-        build_rows_query, build_update_query, build_update_query_value, build_url, catalog_query,
-        column_types_query, columns_query, is_row_returning, is_subquery_wrappable, nullable_query,
-        group_schema, parse_json_rows, primary_key_query, quote_identifier, schema_query,
-        wrap_columns_probe, wrap_select_as_json, wrap_select_as_text, ConnectionConfig, DbEngine,
-        Sort,
+        build_rows_query, build_update_query, build_update_query_value, build_url, cancel_query,
+        catalog_query, column_types_query, columns_query, group_schema, is_row_returning,
+        is_subquery_wrappable, nullable_query, parse_json_rows, primary_key_query,
+        quote_identifier, schema_query, split_sql_statements, with_pool, wrap_columns_probe,
+        wrap_select_as_json, wrap_select_as_text, ConnectionConfig, DbEngine, Sort, CANCELS,
+        CANCEL_SENTINEL,
     };
     use std::collections::HashMap;
 
@@ -2213,5 +2504,184 @@ mod tests {
     #[test]
     fn should_group_an_empty_schema_into_no_tables() {
         assert!(group_schema(Vec::new()).is_empty());
+    }
+
+    // ----- F5: statement splitter (AC-005, TC-001..006) -----
+
+    // TC-001, AC-005 - behavior (a top-level `;` splits a buffer into ordered statements,
+    // each trimmed of surrounding whitespace)
+    #[test]
+    fn should_split_two_statements_on_a_top_level_semicolon() {
+        assert_eq!(
+            split_sql_statements("SELECT 1; SELECT 2"),
+            vec!["SELECT 1".to_string(), "SELECT 2".to_string()]
+        );
+    }
+
+    // TC-002, AC-005 - behavior (a `;` inside a single-quoted string literal is not a split point)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_a_single_quoted_string() {
+        assert_eq!(
+            split_sql_statements("SELECT 'a;b'"),
+            vec!["SELECT 'a;b'".to_string()]
+        );
+    }
+
+    // TC-003, AC-005 - behavior (a `;` inside a double-quoted identifier is not a split point)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_a_double_quoted_identifier() {
+        assert_eq!(
+            split_sql_statements("SELECT \"a;b\" FROM t"),
+            vec!["SELECT \"a;b\" FROM t".to_string()]
+        );
+    }
+
+    // TC-003, AC-005 - behavior (a `;` inside a backtick-quoted identifier is not a split point)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_a_backtick_identifier() {
+        assert_eq!(
+            split_sql_statements("SELECT `a;b` FROM t"),
+            vec!["SELECT `a;b` FROM t".to_string()]
+        );
+    }
+
+    // TC-004, AC-005 - behavior (a `;` inside a `--` line comment is not a split point)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_a_line_comment() {
+        assert_eq!(
+            split_sql_statements("SELECT 1 -- a;b\nFROM t"),
+            vec!["SELECT 1 -- a;b\nFROM t".to_string()]
+        );
+    }
+
+    // TC-004, AC-005 - behavior (a `;` inside a `/* */` block comment is not a split point)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_a_block_comment() {
+        assert_eq!(
+            split_sql_statements("SELECT 1 /* ; */ FROM t"),
+            vec!["SELECT 1 /* ; */ FROM t".to_string()]
+        );
+    }
+
+    // TC-005, AC-005 - behavior (a `;` inside a Postgres `$$ ... $$` dollar-quote is not a split
+    // point - a function body with semicolons stays one statement)
+    #[test]
+    fn should_not_split_on_a_semicolon_inside_an_anonymous_dollar_quote() {
+        let body = "DO $$ BEGIN PERFORM 1; PERFORM 2; END $$";
+        assert_eq!(split_sql_statements(body), vec![body.to_string()]);
+    }
+
+    // TC-005, AC-005 - behavior (a `;` inside a tagged `$x$ ... $x$` dollar-quote is not a split
+    // point; a `;` after the closing tag still splits)
+    #[test]
+    fn should_not_split_inside_a_tagged_dollar_quote_but_split_after_it() {
+        let sql = "CREATE FUNCTION f() RETURNS int AS $x$ BEGIN RETURN 1; END $x$ LANGUAGE plpgsql; SELECT 2";
+        assert_eq!(
+            split_sql_statements(sql),
+            vec![
+                "CREATE FUNCTION f() RETURNS int AS $x$ BEGIN RETURN 1; END $x$ LANGUAGE plpgsql"
+                    .to_string(),
+                "SELECT 2".to_string(),
+            ]
+        );
+    }
+
+    // TC-006, AC-005 - behavior (a trailing `;` produces no empty final statement)
+    #[test]
+    fn should_drop_an_empty_final_statement_after_a_trailing_semicolon() {
+        assert_eq!(
+            split_sql_statements("SELECT 1;"),
+            vec!["SELECT 1".to_string()]
+        );
+    }
+
+    // TC-006, AC-005 - behavior (a buffer of only `;;` yields zero statements)
+    #[test]
+    fn should_yield_no_statements_for_only_semicolons() {
+        assert!(split_sql_statements(";;").is_empty());
+    }
+
+    // TC-006, AC-005 - behavior (a whitespace/comment-only buffer yields zero statements)
+    #[test]
+    fn should_yield_no_statements_for_whitespace_or_comment_only_input() {
+        assert!(split_sql_statements("   \n  ").is_empty());
+        assert!(split_sql_statements("-- just a comment\n").is_empty());
+        assert!(split_sql_statements("/* only a block comment */").is_empty());
+    }
+
+    // ----- F5: held-pool registry (AC-003, TC-010) -----
+
+    // TC-010, AC-003 - side-effect-contract (looking up a pool for an id that was never stored
+    // returns the not-connected error, never a panic; the Err branch needs no live DB)
+    #[test]
+    fn should_return_a_not_connected_error_when_no_pool_is_held_for_the_id() {
+        let result = with_pool("missing-connection-id");
+        assert!(
+            result.is_err(),
+            "an unknown connection id must return Err, not a pool"
+        );
+        let message = result.err().unwrap().to_lowercase();
+        assert!(
+            message.contains("not connected") || message.contains("no connection"),
+            "expected a clear not-connected error, got: {message}"
+        );
+    }
+
+    // ----- F5: cancel registry (AC-007, TC-008/009) -----
+
+    // TC-008, AC-007 - side-effect-contract (a concurrent cancel of a slow run resolves to the
+    // cancel sentinel and the request id is removed from the registry; races a slow future, not a
+    // real DB). Mirrors requi's cancel test: register a token + guard, select! against the slow
+    // future, fire cancel concurrently.
+    #[tokio::test]
+    async fn should_resolve_to_the_cancel_sentinel_and_clean_up_the_registry_when_cancelled() {
+        use std::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let request_id = "f5-cancel".to_string();
+
+        // The same select! cancel shape used by the production execute path, standing in for a
+        // slow query with a sleep since there is no live DB.
+        let run = {
+            let request_id = request_id.clone();
+            async move {
+                let token = CancellationToken::new();
+                CANCELS
+                    .lock()
+                    .unwrap()
+                    .insert(request_id.clone(), token.clone());
+                let _guard = super::CancelGuard {
+                    request_id: request_id.clone(),
+                };
+                let outcome: Result<(), String> = tokio::select! {
+                    biased;
+                    _ = token.cancelled() => Err(CANCEL_SENTINEL.to_string()),
+                    _ = tokio::time::sleep(Duration::from_secs(30)) => Ok(()),
+                };
+                outcome
+            }
+        };
+
+        let handle = tokio::spawn(run);
+        // Give the run a moment to register its token, then cancel it by id.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel_query(request_id.clone()).await;
+
+        let result = handle.await.expect("the run task should not panic");
+        match result {
+            Err(error) => assert_eq!(error, CANCEL_SENTINEL),
+            Ok(_) => panic!("a cancelled run must not resolve to Ok"),
+        }
+        assert!(
+            !CANCELS.lock().unwrap().contains_key(&request_id),
+            "the request id must be removed from the registry after cancel"
+        );
+    }
+
+    // TC-009, AC-007 - behavior (cancel for an unknown request id is a no-op: no panic, no error)
+    #[tokio::test]
+    async fn should_be_a_no_op_when_cancelling_an_unknown_request_id() {
+        cancel_query("never-registered".to_string()).await;
+        assert!(!CANCELS.lock().unwrap().contains_key("never-registered"));
     }
 }

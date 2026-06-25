@@ -6,9 +6,31 @@ import { useWorkspace } from "@/components/workspace/workspace-context";
 
 type ConsoleTab = "log" | "changes" | "history";
 
+// Whether the active tab has clearable content (History entries / pending edits). The Console log
+// is prop-fed (no in-memory store yet), so it has nothing to clear.
+function clearTarget(
+  tab: ConsoleTab,
+  historyCount: number,
+  pendingCount: number,
+): boolean {
+  if (tab === "history") {
+    return historyCount > 0;
+  }
+  if (tab === "changes") {
+    return pendingCount > 0;
+  }
+  return false;
+}
+
 export function Console() {
-  const { consoleLines, pendingEdits, discardPendingEdit, history } =
-    useWorkspace();
+  const {
+    consoleLines,
+    pendingEdits,
+    discardPendingEdit,
+    discardAllPendingEdits,
+    history,
+    clearHistory,
+  } = useWorkspace();
   const pendingCount = pendingEdits.length;
   const [tab, setTab] = useState<ConsoleTab>("log");
   // Auto-focus Changes on the first edit (0 -> 1) and History on each new run,
@@ -56,6 +78,17 @@ export function Console() {
         >
           Console
         </ConsoleTabButton>
+        {clearTarget(tab, history.length, pendingCount) ? (
+          <button
+            type="button"
+            onClick={
+              tab === "history" ? clearHistory : discardAllPendingEdits
+            }
+            className="ml-auto px-3 py-1.5 tracking-wide text-muted-foreground uppercase hover:text-foreground"
+          >
+            Clear
+          </button>
+        ) : null}
       </div>
       {tab === "log" ? (
         <ScrollArea key="log" className="min-h-0 flex-1">

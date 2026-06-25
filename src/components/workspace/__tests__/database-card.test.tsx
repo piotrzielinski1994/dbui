@@ -17,6 +17,7 @@ vi.mock("@/lib/tauri", () => ({
   countTable: vi.fn(),
   applyRowMutations: vi.fn(),
   executeSql: vi.fn(),
+  disconnectDatabase: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -124,6 +125,7 @@ describe("DatabaseCard auto-connect", () => {
 
     await waitFor(() => {
       expect(mockConnect).toHaveBeenCalledWith(
+        "db-app",
         expect.objectContaining({
           host: "localhost",
           database: "app",
@@ -167,7 +169,7 @@ describe("DatabaseCard auto-connect", () => {
     renderCard("db-app", [["db-app", saved]]);
 
     await waitFor(() => {
-      expect(mockConnect).toHaveBeenCalledWith(saved);
+      expect(mockConnect).toHaveBeenCalledWith("db-app", saved);
     });
   });
 });

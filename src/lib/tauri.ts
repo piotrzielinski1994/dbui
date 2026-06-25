@@ -10,21 +10,30 @@ export function greet(name: string): Promise<string> {
   return invoke<string>("greet", { name });
 }
 
-export function connectDatabase(config: ConnectionConfig): Promise<string[]> {
-  return invoke<string[]>("connect_database", { config });
+// Opens + holds a pool for this connection id and returns the table catalog. The only command
+// that sends `config`; the rest address the held pool by id.
+export function connectDatabase(
+  connectionId: string,
+  config: ConnectionConfig,
+): Promise<string[]> {
+  return invoke<string[]>("connect_database", { connectionId, config });
 }
 
-export function fetchSchema(config: ConnectionConfig): Promise<TableSchema[]> {
-  return invoke<TableSchema[]>("fetch_schema", { config });
+export function disconnectDatabase(connectionId: string): Promise<void> {
+  return invoke<void>("disconnect_database", { connectionId });
+}
+
+export function fetchSchema(connectionId: string): Promise<TableSchema[]> {
+  return invoke<TableSchema[]>("fetch_schema", { connectionId });
 }
 
 export function fetchTable(
-  config: ConnectionConfig,
+  connectionId: string,
   table: string,
   opts?: { limit?: number; offset?: number; filter?: string; sort?: Sort | null },
 ): Promise<TableRows> {
   return invoke<TableRows>("fetch_table", {
-    config,
+    connectionId,
     table,
     limit: opts?.limit ?? null,
     offset: opts?.offset ?? 0,
@@ -34,12 +43,12 @@ export function fetchTable(
 }
 
 export function countTable(
-  config: ConnectionConfig,
+  connectionId: string,
   table: string,
   filter?: string,
 ): Promise<number> {
   return invoke<number>("count_table", {
-    config,
+    connectionId,
     table,
     filter: filter ?? null,
   });
@@ -65,14 +74,15 @@ export type DeleteMutation = {
 export type RowMutation = CellMutation | InsertMutation | DeleteMutation;
 
 export function applyRowMutations(
-  config: ConnectionConfig,
+  connectionId: string,
   table: string,
   mutations: RowMutation[],
 ): Promise<number> {
-  return invoke<number>("apply_mutations", { config, table, mutations });
+  return invoke<number>("apply_mutations", { connectionId, table, mutations });
 }
 
 export type QueryOutcome = {
+  statement: string;
   columns: string[];
   rows: (string | null)[][];
   rowsAffected: number;
@@ -80,9 +90,22 @@ export type QueryOutcome = {
   message: string;
 };
 
+// Runs one or more `;`-separated statements on the held connection, returning one outcome per
+// statement. `requestId` lets a concurrent `cancelQuery` abort the run.
 export function executeSql(
-  config: ConnectionConfig,
+  connectionId: string,
   sql: string,
-): Promise<QueryOutcome> {
-  return invoke<QueryOutcome>("execute_sql", { config, sql });
+  requestId: string,
+): Promise<QueryOutcome[]> {
+  return invoke<QueryOutcome[]>("execute_sql", { connectionId, sql, requestId });
+}
+
+export function cancelQuery(requestId: string): Promise<void> {
+  return invoke<void>("cancel_query", { requestId });
+}
+
+// The Rust `connect_database` registers its cancel token under a `connect:`-namespaced key (see
+// `connect_cancel_key`), so aborting an in-flight connect is the same cancel registry as a query.
+export function cancelConnect(connectionId: string): Promise<void> {
+  return cancelQuery(`connect:${connectionId}`);
 }
