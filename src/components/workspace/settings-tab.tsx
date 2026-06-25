@@ -135,7 +135,7 @@ export function SettingsTab() {
 
 function ConnectionForm({ node }: { node: DatabaseNode }) {
   const { connections, connectionStatus, renameDatabase } = useWorkspace();
-  const { connect, disconnect } = useConnectionActions();
+  const { connect, disconnect, abortConnect } = useConnectionActions();
   const [form, setForm] = useState<ConnectionForm>(() => formFromNode(node));
   const nodeId = node.id;
   const isConnected = connections.has(nodeId);
@@ -243,13 +243,17 @@ function ConnectionForm({ node }: { node: DatabaseNode }) {
           >
             Disconnect
           </Button>
+        ) : isConnecting ? (
+          <Button type="button" onClick={() => abortConnect(nodeId)}>
+            Cancel
+          </Button>
         ) : (
           <Button
             type="button"
             onClick={() => connect(nodeId, configFromForm(form))}
-            disabled={isConnecting || !isConnectable}
+            disabled={!isConnectable}
           >
-            {isConnecting ? "Connecting..." : "Connect"}
+            Connect
           </Button>
         )}
       </div>

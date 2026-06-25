@@ -20,6 +20,7 @@ vi.mock("@/lib/tauri", () => ({
   fetchTable: vi.fn(),
   countTable: vi.fn(),
   applyRowMutations: vi.fn(),
+  disconnectDatabase: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -250,7 +251,7 @@ describe("TableCard live content", () => {
 
     await screen.findByText("1");
     expect(mockFetch).toHaveBeenCalledWith(
-      config,
+      "db-ppp",
       "product",
       expect.objectContaining({ filter: undefined }),
     );
@@ -267,7 +268,7 @@ describe("TableCard live content", () => {
 
     // not applied yet - no Enter
     expect(mockFetch).not.toHaveBeenCalledWith(
-      config,
+      "db-ppp",
       "product",
       expect.objectContaining({ filter: "price > 10" }),
     );
@@ -277,7 +278,7 @@ describe("TableCard live content", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ filter: "price > 10" }),
       );
@@ -296,7 +297,7 @@ describe("TableCard live content", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ filter: "price > 10" }),
       );
@@ -328,7 +329,7 @@ describe("TableCard live content", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ filter: "price > 10" }),
       );
@@ -395,7 +396,7 @@ describe("TableCard sorting", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({
           sort: { column: "price", descending: false },
@@ -414,7 +415,7 @@ describe("TableCard sorting", () => {
     await user.click(screen.getByRole("columnheader", { name: "price" }));
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ sort: { column: "price", descending: false } }),
       );
@@ -423,7 +424,7 @@ describe("TableCard sorting", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({
           sort: { column: "price", descending: true },
@@ -471,7 +472,7 @@ describe("TableCard pagination", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ offset: 200 }),
       );
@@ -508,7 +509,7 @@ describe("TableCard pagination", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({
           offset: 0,
@@ -542,7 +543,7 @@ describe("TableCard pagination", () => {
     await user.click(screen.getByRole("columnheader", { name: "id" }));
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ sort: { column: "id", descending: false } }),
       );
@@ -565,7 +566,7 @@ describe("TableCard pagination", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ limit: 500, offset: 0 }),
       );
@@ -610,7 +611,7 @@ describe("TableCard pagination", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ offset: 0, filter: "id = 5" }),
       );
@@ -674,7 +675,7 @@ describe("TableCard cell editing", () => {
     await user.click(screen.getByRole("button", { name: /save/i }));
 
     await waitFor(() => {
-      expect(mockUpdate).toHaveBeenCalledWith(config, "product", [
+      expect(mockUpdate).toHaveBeenCalledWith("db-ppp", "product", [
         expect.objectContaining({
           kind: "cell",
           column: "price",
@@ -926,7 +927,7 @@ describe("TableCard filter with unsaved edits", () => {
       await screen.findByRole("dialog", { name: /discard/i }),
     ).toBeInTheDocument();
     expect(mockFetch).not.toHaveBeenCalledWith(
-      config,
+      "db-ppp",
       "product",
       expect.objectContaining({ filter: "price > 10" }),
     );
@@ -949,7 +950,7 @@ describe("TableCard filter with unsaved edits", () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ filter: "price > 10" }),
       );
@@ -977,7 +978,7 @@ describe("TableCard filter with unsaved edits", () => {
     await user.click(await screen.findByRole("button", { name: /cancel/i }));
 
     expect(mockFetch).not.toHaveBeenCalledWith(
-      config,
+      "db-ppp",
       "product",
       expect.objectContaining({ filter: "price > 10" }),
     );
@@ -998,7 +999,7 @@ describe("TableCard filter with unsaved edits", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => {
       expect(mockFetch).toHaveBeenLastCalledWith(
-        config,
+        "db-ppp",
         "product",
         expect.objectContaining({ filter: "price > 10" }),
       );

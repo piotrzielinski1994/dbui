@@ -9,9 +9,8 @@ import {
   selectedOrAllSql,
 } from "@/components/workspace/sql-editor";
 import { useWorkspace } from "@/components/workspace/workspace-context";
-import { executeSql, type QueryOutcome } from "@/lib/tauri";
+import { cancelQuery, executeSql, type QueryOutcome } from "@/lib/tauri";
 import type {
-  ConnectionConfig,
   DbEngine,
   Sort,
   TableSchema,
@@ -19,6 +18,28 @@ import type {
 
 const noop = () => {};
 const alwaysFalse = () => false;
+
+// The Rust cancel path rejects a cancelled run with this exact string (mirrors requi). It is a
+// control signal, never shown raw to the user - it surfaces as a neutral "Cancelled" status.
+const CANCEL_SENTINEL = "__cancelled__";
+
+function isCancelled(error: unknown): boolean {
+  return error === CANCEL_SENTINEL;
+}
+
+// The grid shows the LAST row-returning statement (or, if none return rows, the last outcome so its
+// rows-affected message still renders). Mirrors how psql/DBeaver surface a multi-statement run.
+function lastDisplayOutcome(
+  outcomes: QueryOutcome[],
+): QueryOutcome | undefined {
+  if (outcomes.length === 0) {
+    return undefined;
+  }
+  return (
+    [...outcomes].reverse().find((outcome) => outcome.returnsRows) ??
+    outcomes[outcomes.length - 1]
+  );
+}
 
 // The SQL result holds arbitrary user-query rows whose types are unknown, so sorting happens
 // client-side over the in-memory rows (no re-run). Locale-compares cells, NULLs sort last.
@@ -110,11 +131,11 @@ function OutcomeGrid({ outcome }: { outcome: QueryOutcome }) {
 }
 
 function LiveStatus({
-  outcome,
+  outcomes,
   error,
   isPending,
 }: {
-  outcome: QueryOutcome | undefined;
+  outcomes: QueryOutcome[] | undefined;
   error: unknown;
   isPending: boolean;
 }) {
@@ -126,22 +147,69 @@ function LiveStatus({
     );
   }
   if (error) {
+    if (isCancelled(error)) {
+      return (
+        <span className="font-mono text-xs text-muted-foreground">
+          Cancelled
+        </span>
+      );
+    }
     return (
       <span className="font-mono text-xs text-red-600 dark:text-red-400">
         {errorMessage(error)}
       </span>
     );
   }
-  if (!outcome) {
+  if (!outcomes || outcomes.length === 0) {
     return (
       <span className="font-mono text-xs text-muted-foreground">Ready</span>
     );
   }
+  const display = lastDisplayOutcome(outcomes);
+  const message =
+    outcomes.length > 1
+      ? `${outcomes.length} statements - OK`
+      : (display?.message ?? "OK");
   return (
     <div className="flex items-center gap-3 font-mono text-xs">
       <span className="text-green-600 dark:text-green-400">Success</span>
-      <span className="text-muted-foreground">{outcome.message}</span>
+      <span className="text-muted-foreground">{message}</span>
     </div>
+  );
+}
+
+// Renders the result body: the last row-returning statement's grid, or the last outcome's message
+// when none return rows. A cancel is neutral (muted "Cancelled"), a real error is red.
+function SqlResult({
+  outcomes,
+  error,
+}: {
+  outcomes: QueryOutcome[] | undefined;
+  error: unknown;
+}) {
+  if (error) {
+    if (isCancelled(error)) {
+      return (
+        <p className="p-3 font-mono text-sm text-muted-foreground">Cancelled</p>
+      );
+    }
+    return (
+      <p className="p-3 font-mono text-sm text-red-600 dark:text-red-400">
+        {errorMessage(error)}
+      </p>
+    );
+  }
+  if (!outcomes || outcomes.length === 0) {
+    return null;
+  }
+  const display = lastDisplayOutcome(outcomes);
+  if (display?.returnsRows) {
+    return <OutcomeGrid outcome={display} />;
+  }
+  return (
+    <p className="p-3 font-mono text-sm text-muted-foreground">
+      {display?.message ?? "OK"}
+    </p>
   );
 }
 
@@ -152,11 +220,12 @@ export function SqlTab() {
     return null;
   }
 
-  const config = connections.get(activeNode.id);
+  const isConnected = connections.has(activeNode.id);
   return (
     <SqlPane
       node={activeNode}
-      config={config}
+      connectionId={activeNode.id}
+      isConnected={isConnected}
       engine={activeNode.engine}
       schema={databaseSchemas.get(activeNode.id) ?? EMPTY_SCHEMA}
       key={activeNode.id}
@@ -175,12 +244,14 @@ function errorMessage(error: unknown): string {
 
 function SqlPane({
   node,
-  config,
+  connectionId,
+  isConnected,
   engine,
   schema,
 }: {
   node: { id: string; sql: string };
-  config: ConnectionConfig | undefined;
+  connectionId: string;
+  isConnected: boolean;
   engine: DbEngine;
   schema: TableSchema[];
 }) {
@@ -188,34 +259,53 @@ function SqlPane({
     useWorkspace();
   const [sql, setSql] = useState(node.sql);
   const editorRef = useRef<EditorView | null>(null);
-  const run = useMutation<QueryOutcome, unknown, string>({
-    mutationFn: (query: string) =>
-      executeSql(config as ConnectionConfig, query),
-    onSuccess: (outcome, query) =>
-      addHistoryEntry({
-        id: `ok-${query}-${outcome.message}`,
-        sql: query,
-        status: "success",
-        message: outcome.message,
-        at: new Date().toLocaleTimeString(),
-      }),
-    onError: (error, query) =>
+  // The request id of the in-flight run, so Cancel targets exactly this run.
+  const requestIdRef = useRef<string | null>(null);
+  const run = useMutation<QueryOutcome[], unknown, string>({
+    mutationFn: (query: string) => {
+      const requestId = crypto.randomUUID();
+      requestIdRef.current = requestId;
+      return executeSql(connectionId, query, requestId);
+    },
+    onSuccess: (outcomes, query) =>
+      // One History entry per statement so each is individually visible, each logging its OWN
+      // statement text (not the whole buffer). The single-statement case logs one entry as before.
+      outcomes.forEach((outcome, index) =>
+        addHistoryEntry({
+          id: `ok-${query}-${index}-${outcome.message}`,
+          sql: outcome.statement || query,
+          status: "success",
+          message: outcome.message,
+          at: new Date().toLocaleTimeString(),
+        }),
+      ),
+    // A cancelled run is a neutral outcome, not an error - it is NOT logged to History.
+    onError: (error, query) => {
+      if (isCancelled(error)) {
+        return;
+      }
       addHistoryEntry({
         id: `err-${query}`,
         sql: query,
         status: "error",
         message: errorMessage(error),
         at: new Date().toLocaleTimeString(),
-      }),
+      });
+    },
   });
 
-  const canRun = Boolean(config) && sql.trim().length > 0 && !run.isPending;
+  const canRun = isConnected && sql.trim().length > 0 && !run.isPending;
   const submit = () => {
     if (!canRun) {
       return;
     }
     const query = selectedOrAllSql(editorRef.current);
     run.mutate(query.trim().length > 0 ? query : sql);
+  };
+  const cancel = () => {
+    if (requestIdRef.current) {
+      void cancelQuery(requestIdRef.current);
+    }
   };
 
   return (
@@ -228,19 +318,29 @@ function SqlPane({
       left={
         <div className="flex h-full min-w-0 flex-col">
           <div className="flex h-9 shrink-0 items-stretch justify-end border-b bg-muted/30">
-            {!config ? (
+            {!isConnected ? (
               <span className="flex items-center px-3 font-mono text-xs text-muted-foreground">
                 Connect first (Settings tab)
               </span>
             ) : null}
-            <Button
-              type="button"
-              onClick={submit}
-              disabled={!canRun}
-              className="h-full shrink-0 rounded-none border-0 border-l border-l-border"
-            >
-              {run.isPending ? "Running..." : "Run"}
-            </Button>
+            {run.isPending ? (
+              <Button
+                type="button"
+                onClick={cancel}
+                className="h-full shrink-0 rounded-none border-0 border-l border-l-border"
+              >
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={submit}
+                disabled={!canRun}
+                className="h-full shrink-0 rounded-none border-0 border-l border-l-border"
+              >
+                Run
+              </Button>
+            )}
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <SqlEditor
@@ -260,25 +360,13 @@ function SqlPane({
         <div className="flex h-full min-w-0 flex-col">
           <div className="flex h-9 shrink-0 items-center border-b bg-muted/30 px-3">
             <LiveStatus
-              outcome={run.data}
+              outcomes={run.data}
               error={run.error}
               isPending={run.isPending}
             />
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            {run.data ? (
-              run.data.returnsRows ? (
-                <OutcomeGrid outcome={run.data} />
-              ) : (
-                <p className="p-3 font-mono text-sm text-muted-foreground">
-                  {run.data.message}
-                </p>
-              )
-            ) : run.error ? (
-              <p className="p-3 font-mono text-sm text-red-600 dark:text-red-400">
-                {errorMessage(run.error)}
-              </p>
-            ) : null}
+            <SqlResult outcomes={run.data} error={run.error} />
           </div>
         </div>
       }

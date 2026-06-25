@@ -17,6 +17,7 @@ import type {
 vi.mock("@/lib/tauri", () => ({
   connectDatabase: vi.fn(),
   fetchSchema: vi.fn(),
+  disconnectDatabase: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -114,7 +115,7 @@ describe("connect schema fetch", () => {
     await waitFor(() => {
       expect(screen.getByTestId("schema")).toHaveTextContent("users");
     });
-    expect(mockFetchSchema).toHaveBeenCalledWith(config);
+    expect(mockFetchSchema).toHaveBeenCalledWith("db-app");
   });
 
   // TC-011 / AC-007 - behavior: disconnect clears the stored schema.

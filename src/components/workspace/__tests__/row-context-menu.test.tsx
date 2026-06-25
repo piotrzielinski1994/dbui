@@ -16,6 +16,7 @@ import { fixtureTree } from "@/components/workspace/__tests__/fixtures";
 vi.mock("@/lib/tauri", () => ({
   connectDatabase: vi.fn(),
   fetchSchema: vi.fn(() => Promise.resolve([])),
+  disconnectDatabase: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -130,6 +131,7 @@ describe("row context menu - database row", () => {
       expect(mockConnect).toHaveBeenCalledTimes(1);
     });
     expect(mockConnect).toHaveBeenCalledWith(
+      "db-admin",
       expect.objectContaining({
         engine: "postgres",
         host: "db.internal",

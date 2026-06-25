@@ -73,7 +73,10 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > SQL tab is a live CodeMirror editor (SQL syntax highlighting; autocomplete of keywords, the
 > connected database's tables, and their columns from the live schema): edit SQL and Run it
 > (or Cmd/Ctrl+Enter) against the connected database - row-returning queries show a result
-> grid, other statements report rows-affected. With a non-empty selection, Run executes only
+> grid, other statements report rows-affected. You can run several `;`-separated statements in
+> one go - they execute in order on one held connection, so your own `BEGIN`/`COMMIT` spans them;
+> the result grid shows the last row-returning statement. While a query runs the Run button
+> becomes **Cancel**. With a non-empty selection, Run executes only
 > the selected text; otherwise the whole buffer. The editor|results split flips between
 > side-by-side and stacked via `Cmd/Ctrl+\` (or the "Toggle split layout" palette command).
 > Views/Script tabs remain mock. The sidebar tree + its connection configs persist in

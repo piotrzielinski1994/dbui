@@ -112,7 +112,9 @@ type WorkspaceContextValue = {
   upsertPendingEdit: (edit: PendingMutation) => void;
   discardPendingEdit: (id: string) => void;
   discardPendingEditsForTable: (tableId: string) => void;
+  discardAllPendingEdits: () => void;
   addHistoryEntry: (entry: HistoryEntry) => void;
+  clearHistory: () => void;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -390,6 +392,8 @@ export function WorkspaceProvider({
       ),
     [],
   );
+  const discardAllPendingEdits = useCallback(() => setPendingEdits([]), []);
+  const clearHistory = useCallback(() => setHistory([]), []);
   const addHistoryEntry = useCallback(
     (entry: HistoryEntry) =>
       setHistory((current) =>
@@ -516,8 +520,10 @@ export function WorkspaceProvider({
       upsertPendingEdit,
       discardPendingEdit,
       discardPendingEditsForTable,
+      discardAllPendingEdits,
       history,
       addHistoryEntry,
+      clearHistory,
       splitOrientation,
       toggleSplitOrientation: () =>
         setSplitOrientation((current) =>
@@ -552,7 +558,9 @@ export function WorkspaceProvider({
     upsertPendingEdit,
     discardPendingEdit,
     discardPendingEditsForTable,
+    discardAllPendingEdits,
     addHistoryEntry,
+    clearHistory,
   ]);
 
   useEffect(() => {

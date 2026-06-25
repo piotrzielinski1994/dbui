@@ -12,6 +12,7 @@ import type { ConnectionConfig, TreeNode } from "@/lib/workspace/model";
 
 vi.mock("@/lib/tauri", () => ({
   executeSql: vi.fn(),
+  disconnectDatabase: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -123,33 +124,35 @@ describe("SqlTab run", () => {
   // TC-004 — behavior (Run executes the editor SQL against the stored connection)
   it("should execute the editor SQL with the stored connection config when Run is clicked", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["n"],
       rows: [["42"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     replaceDoc(liveView(container), "SELECT 42 AS n");
     await user.click(screen.getByRole("button", { name: /run/i }));
 
     await waitFor(() => {
-      expect(mockExecute).toHaveBeenCalledWith(config, "SELECT 42 AS n");
+      expect(mockExecute).toHaveBeenCalledWith("db-ppp", "SELECT 42 AS n", expect.any(String));
     });
   });
 
   // TC-006 / AC-004 — behavior (a non-empty selection runs only the selected text)
   it("should run only the selected text when a selection is set", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["n"],
       rows: [["2"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     const view = liveView(container);
@@ -161,20 +164,21 @@ describe("SqlTab run", () => {
     await user.click(screen.getByRole("button", { name: /run/i }));
 
     await waitFor(() => {
-      expect(mockExecute).toHaveBeenCalledWith(config, "SELECT 2");
+      expect(mockExecute).toHaveBeenCalledWith("db-ppp", "SELECT 2", expect.any(String));
     });
   });
 
   // TC-007 / AC-004 — behavior (cursor only, empty range, runs the whole buffer)
   it("should run the whole buffer when there is no selection", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["n"],
       rows: [["1"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     const view = liveView(container);
@@ -185,20 +189,21 @@ describe("SqlTab run", () => {
     await user.click(screen.getByRole("button", { name: /run/i }));
 
     await waitFor(() => {
-      expect(mockExecute).toHaveBeenCalledWith(config, buffer);
+      expect(mockExecute).toHaveBeenCalledWith("db-ppp", buffer, expect.any(String));
     });
   });
 
   // TC-008 / AC-004 — behavior (a whitespace-only selection is treated as no selection)
   it("should run the whole buffer when the selection is whitespace only", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["n"],
       rows: [["1"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     const view = liveView(container);
@@ -211,14 +216,15 @@ describe("SqlTab run", () => {
     await user.click(screen.getByRole("button", { name: /run/i }));
 
     await waitFor(() => {
-      expect(mockExecute).toHaveBeenCalledWith(config, buffer);
+      expect(mockExecute).toHaveBeenCalledWith("db-ppp", buffer, expect.any(String));
     });
   });
 
   // behavior (a row-returning result renders a grid)
   it("should render the result columns and rows after a successful run", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["id", "name"],
       rows: [
         ["1", "Ada"],
@@ -227,7 +233,7 @@ describe("SqlTab run", () => {
       rowsAffected: 2,
       returnsRows: true,
       message: "SELECT 2",
-    });
+    }]);
     renderSql({ connected: true });
 
     await user.click(screen.getByRole("button", { name: /run/i }));
@@ -242,13 +248,14 @@ describe("SqlTab run", () => {
   // behavior (a non-row statement shows its rows-affected message, no grid)
   it("should show the rows-affected message for a write statement", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: [],
       rows: [],
       rowsAffected: 3,
       returnsRows: false,
       message: "OK - 3 row(s) affected",
-    });
+    }]);
     renderSql({ connected: true });
 
     await user.click(screen.getByRole("button", { name: /run/i }));
@@ -276,13 +283,14 @@ describe("SqlTab run", () => {
   // TC-005 — behavior (Cmd/Ctrl+Enter in the editor runs the query)
   it("should run the query on Ctrl+Enter in the editor", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["n"],
       rows: [["1"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     const editor = container.querySelector<HTMLElement>(".cm-content");
@@ -316,13 +324,14 @@ describe("SqlTab run", () => {
   // behavior (a successful run is logged to the History tab)
   it("should log a run to the History tab", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "SELECT 1 AS n",
       columns: ["n"],
       rows: [["1"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     const { container } = renderSql({ connected: true });
 
     replaceDoc(liveView(container), "SELECT 1 AS n");
@@ -353,7 +362,8 @@ describe("SqlTab run", () => {
   // behavior (AC-008: clicking a result header sorts the rows in memory, no re-run)
   it("should sort the result rows client-side when a header is clicked", async () => {
     const user = userEvent.setup();
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["id", "name"],
       rows: [
         ["3", "Cleo"],
@@ -363,7 +373,7 @@ describe("SqlTab run", () => {
       rowsAffected: 3,
       returnsRows: true,
       message: "SELECT 3",
-    });
+    }]);
     renderSql({ connected: true });
 
     await user.click(screen.getByRole("button", { name: /run/i }));
@@ -388,13 +398,14 @@ describe("SqlTab run", () => {
       configurable: true,
       value: { writeText },
     });
-    mockExecute.mockResolvedValue({
+    mockExecute.mockResolvedValue([{
+      statement: "stmt",
       columns: ["id", "name"],
       rows: [["1", "Ada"]],
       rowsAffected: 1,
       returnsRows: true,
       message: "SELECT 1",
-    });
+    }]);
     renderSql({ connected: true });
 
     await user.click(screen.getByRole("button", { name: /run/i }));
