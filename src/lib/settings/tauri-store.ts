@@ -1,4 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { logMessage } from "@/lib/logging/file-log";
 import {
   DEFAULT_SETTINGS,
   mergeSettings,
@@ -24,7 +25,7 @@ export function createTauriSettingsStore(): SettingsStore {
       .set(SETTINGS_KEY, settings)
       .then(() => settingsStore.save())
       .catch((error) => {
-        console.warn("Failed to persist settings", error);
+        logMessage("warn", `Failed to persist settings: ${String(error)}`);
       });
   };
 

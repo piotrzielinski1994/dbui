@@ -99,13 +99,14 @@ src/
                         command palette (Cmd/Ctrl+K)
     ui/                 shadcn primitives
   lib/                  tauri.ts (typed invoke wrappers), utils.ts (cn),
+                        logging/ (file-log.ts: best-effort logMessage -> Rust file log),
                         settings/ (UI-state JSON persistence: types + mergeSettings,
                         tauri/in-memory stores, SettingsProvider),
                         workspace/ (sidebar tree from workspace.json: types +
                         mergeWorkspace + hydrate/dehydrate, stores, WorkspaceStoreProvider)
   index.css             Tailwind v4 + theme tokens
   test/setup.ts         Vitest + Testing Library setup
-src-tauri/              Rust desktop shell (greet command, tauri.conf.json)
+src-tauri/              Rust desktop shell (greet command, logging.rs file logger, tauri.conf.json)
 tests/e2e/              Behavior smoke tests
 docs/                   spec/plan per feature, ADR, learnings, design.md
 ```

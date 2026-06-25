@@ -1,4 +1,5 @@
 mod db;
+mod logging;
 
 use db::{
     apply_row_mutations, cancel_query as cancel_query_db, connect_database as connect_database_db,
@@ -94,6 +95,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .setup(|app| {
+            logging::init(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             connect_database,
@@ -103,7 +108,8 @@ pub fn run() {
             apply_mutations,
             execute_sql,
             cancel_query,
-            fetch_schema
+            fetch_schema,
+            logging::log_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

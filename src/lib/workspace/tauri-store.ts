@@ -1,4 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { logMessage } from "@/lib/logging/file-log";
 import {
   DEFAULT_WORKSPACE,
   mergeWorkspace,
@@ -24,7 +25,7 @@ export function createTauriWorkspaceStore(): WorkspaceStore {
       .set(WORKSPACE_KEY, workspace)
       .then(() => store.save())
       .catch((error) => {
-        console.warn("Failed to persist workspace", error);
+        logMessage("warn", `Failed to persist workspace: ${String(error)}`);
       });
   };
 
