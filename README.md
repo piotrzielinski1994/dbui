@@ -96,8 +96,17 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > Views/Script tabs remain mock. The sidebar tree + its connection configs persist in
 > `workspace.json`; UI/layout state (panel toggles, split orientation, expanded nodes, open
 > tabs) persists in `settings.json`; the theme **mode** also lives in `settings.json` while the
-> per-mode **color overrides** persist in a separate `theme.json` - all JSON files in the OS
-> app-config dir (via `@tauri-apps/plugin-store`).
+> per-mode **color overrides** persist in a separate `theme.json`, and the **keyboard-shortcut
+> overrides** persist in a separate `keymap.json` - all JSON files in the OS app-config dir (via
+> `@tauri-apps/plugin-store`).
+>
+> **Keyboard shortcuts are customizable.** Every app shortcut is a registry action with a scope
+> (global / tabs / data grid / sidebar / query editor); the `/settings` route's **Keyboard
+> Shortcuts** section lists them grouped by scope and lets you rebind any one by pressing **Edit**
+> and typing a combination (Escape cancels, so it can't be assigned). Conflicts are detected
+> **per-scope** - the same combo can mean different things in different scopes (e.g. Backspace
+> deletes grid rows vs sidebar nodes). Only the sparse overrides persist (`keymap.json`); the
+> command-palette hints derive from the live bindings. Built on `@tanstack/react-hotkeys`.
 >
 > The app supports **multiple themes**: an appearance **mode** (Light / Dark / System - System
 > follows the OS `prefers-color-scheme` live) plus optional **per-mode color overrides** of the 18
@@ -142,12 +151,16 @@ src/
                         Query reuses the SQL editor pane), table card, query-preview (per-engine
                         preview/filter strategy), console, command palette (Cmd/Ctrl+K),
                         schema-intellisense (JSON-schema CM editor)
-    settings/           app-level settings UI: theme-section (mode buttons + JSON color editor)
+    settings/           app-level settings UI: theme-section (mode buttons + JSON color editor),
+                        shortcuts-section + shortcut-row (per-scope keybinding recorder rows)
     ui/                 shadcn primitives
   lib/                  tauri.ts (typed invoke wrappers), utils.ts (cn),
                         logging/ (file-log.ts: best-effort logMessage -> Rust file log),
-                        settings/ (UI-state + theme-mode JSON persistence: types + mergeSettings,
-                        settings.json/theme.json stores, SettingsProvider),
+                        settings/ (UI-state + theme-mode + shortcut-override JSON persistence:
+                        types + mergeSettings, settings.json/theme.json/keymap.json stores,
+                        SettingsProvider),
+                        shortcuts/ (scoped action registry, resolveShortcuts + per-scope
+                        findConflict, matchesHotkey dispatch matcher, toCodeMirrorKey bridge),
                         theme/ (theme-defaults + mode/override helpers + ThemeProvider: .dark class
                         + inline CSS vars + live OS-preference follow),
                         config-schema/ (zod + zod-derived JSON schema for the color editor),

@@ -32,6 +32,10 @@ import {
 import { useThemeOptional } from "@/lib/theme/theme-context";
 import { applyDefaults } from "@/lib/theme/overrides";
 import { DEFAULT_THEME_COLORS } from "@/lib/theme/theme-defaults";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
 import type { DbEngine, TableSchema } from "@/lib/workspace/model";
 
 const dialects = {
@@ -321,6 +325,16 @@ export function SqlEditor({
   const editorColors = effectiveColors[effectiveMode].editor as EditorColors;
   const colorsKey = `${effectiveMode}:${JSON.stringify(editorColors)}`;
 
+  // run-query / save-script are user-rebindable; bridge their resolved bindings into the CodeMirror
+  // keymap. A single-line editor (filter row) keeps its intrinsic Enter-to-submit.
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
+  const effectiveShortcuts = resolveShortcuts(shortcuts);
+  const runKey = singleLine
+    ? "Enter"
+    : (toCodeMirrorKey(effectiveShortcuts["run-query"]) ?? "Mod-Enter");
+  const saveKey = toCodeMirrorKey(effectiveShortcuts["save-script"]) ?? "Mod-s";
+
   // A stable key for the collection list so a same-content array doesn't rebuild the language; a
   // real collection change does. Kept as a simple expression for the deps lint.
   const collectionsKey = (collections ?? []).join(" ");
@@ -334,7 +348,7 @@ export function SqlEditor({
           (c) => c.name,
         )
       : undefined;
-    const submitKey = singleLine ? "Enter" : "Mod-Enter";
+    const submitKey = runKey;
     return [
       buildSqlLanguage(
         engine,
@@ -362,7 +376,7 @@ export function SqlEditor({
           ...(onSave
             ? [
                 {
-                  key: "Mod-s",
+                  key: saveKey,
                   run: () => {
                     onSave();
                     return true;
@@ -387,6 +401,8 @@ export function SqlEditor({
     defaultTable,
     collectionsKey,
     colorsKey,
+    runKey,
+    saveKey,
   ]);
 
   return (

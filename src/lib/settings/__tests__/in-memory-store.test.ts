@@ -13,6 +13,7 @@ const nonDefaultSettings: Settings = {
   openTabIds: ["db-admin", "tbl-accounts"],
   activeTabId: "tbl-accounts",
   theme: DEFAULT_SETTINGS.theme,
+  shortcuts: {},
 };
 
 describe("createInMemorySettingsStore", () => {

@@ -1,6 +1,7 @@
 import { createRoute, Link } from "@tanstack/react-router";
 import { rootRoute } from "@/routes/__root";
 import { ThemeSection } from "@/components/settings/theme-section";
+import { ShortcutsSection } from "@/components/settings/shortcuts-section";
 
 function SettingsPage() {
   return (
@@ -12,6 +13,7 @@ function SettingsPage() {
         </Link>
       </div>
       <ThemeSection />
+      <ShortcutsSection />
     </div>
   );
 }

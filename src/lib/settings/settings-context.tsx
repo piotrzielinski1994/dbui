@@ -14,12 +14,15 @@ import {
   type ThemeColors,
   type ThemeMode,
 } from "@/lib/settings/settings";
+import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 
 type SettingsContextValue = {
   settings: Settings;
   persist: (next: Settings) => void;
   saveThemeMode: (mode: ThemeMode) => void;
   saveThemeColors: (colors: ThemeColors) => void;
+  saveShortcut: (id: ShortcutActionId, hotkey: string) => void;
+  resetShortcut: (id: ShortcutActionId) => void;
 };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -75,12 +78,46 @@ export function SettingsProvider({ store, children }: SettingsProviderProps) {
     [update],
   );
 
+  const saveShortcut = useCallback(
+    (id: ShortcutActionId, hotkey: string) =>
+      update((base) => ({
+        ...base,
+        shortcuts: { ...base.shortcuts, [id]: hotkey },
+      })),
+    [update],
+  );
+
+  const resetShortcut = useCallback(
+    (id: ShortcutActionId) =>
+      update((base) => ({
+        ...base,
+        shortcuts: Object.fromEntries(
+          Object.entries(base.shortcuts).filter(([key]) => key !== id),
+        ),
+      })),
+    [update],
+  );
+
   const value = useMemo<SettingsContextValue | null>(
     () =>
       settings === null
         ? null
-        : { settings, persist, saveThemeMode, saveThemeColors },
-    [settings, persist, saveThemeMode, saveThemeColors],
+        : {
+            settings,
+            persist,
+            saveThemeMode,
+            saveThemeColors,
+            saveShortcut,
+            resetShortcut,
+          },
+    [
+      settings,
+      persist,
+      saveThemeMode,
+      saveThemeColors,
+      saveShortcut,
+      resetShortcut,
+    ],
   );
 
   if (value === null) {
@@ -100,4 +137,11 @@ export function useSettings(): SettingsContextValue {
     throw new Error("useSettings must be used within a SettingsProvider");
   }
   return value;
+}
+
+// Returns null outside a SettingsProvider instead of throwing - lets the workspace
+// layout read shortcut overrides while still rendering in isolation (tests, or any
+// subtree mounted without the root provider), falling back to the registry defaults.
+export function useSettingsOptional(): SettingsContextValue | null {
+  return useContext(SettingsContext);
 }

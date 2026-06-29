@@ -25,6 +25,7 @@ describe("DEFAULT_SETTINGS", () => {
           dark: { tokens: {}, editor: {} },
         },
       },
+      shortcuts: {},
     });
   });
 });
@@ -52,6 +53,7 @@ describe("mergeSettings", () => {
           dark: { tokens: {}, editor: { string: "oklch(0.74 0.15 60)" } },
         },
       },
+      shortcuts: {},
     };
 
     expect(mergeSettings(DEFAULT_SETTINGS, full)).toEqual(full);
@@ -94,6 +96,7 @@ describe("mergeSettings", () => {
           dark: { tokens: {}, editor: {} },
         },
       },
+      shortcuts: {},
     });
     expect(merged).not.toHaveProperty("bogus");
     expect(merged).not.toHaveProperty("extra");

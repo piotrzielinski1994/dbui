@@ -43,6 +43,10 @@ import {
   type PendingMutation,
 } from "@/components/workspace/workspace-context";
 import { queryPreview } from "@/components/workspace/query-preview";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
 import type {
   ConnectionConfig,
   Sort,
@@ -185,6 +189,8 @@ function TableView({
   onEditDocument?: (rowIndex: number) => void;
 }) {
   const [isRecordView, setIsRecordView] = useState(false);
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
   const EMPTY_SELECTION = useMemo<RowSelectionState>(
     () => ({ selected: new Set<number>(), anchor: null }),
     [],
@@ -214,8 +220,9 @@ function TableView({
   );
 
   useEffect(() => {
+    const recordViewBinding = resolveShortcuts(shortcuts)["toggle-record-view"];
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") {
+      if (!matchesHotkey(event, recordViewBinding)) {
         return;
       }
       const target = event.target as HTMLElement | null;
@@ -230,7 +237,7 @@ function TableView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [shortcuts]);
 
   const editValueAt = useCallback(
     (rowIndex: number, column: string): Cell => {

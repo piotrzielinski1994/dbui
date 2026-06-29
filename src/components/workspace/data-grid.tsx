@@ -25,6 +25,10 @@ import {
 } from "@/components/ui/context-menu";
 import { toCsv, toJson } from "@/lib/export";
 import { isEditableTarget } from "@/lib/workspace/is-editable-target";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
 import type { RowSelectMode } from "@/lib/workspace/row-select";
 import type { Sort, TableColumn } from "@/lib/workspace/model";
 
@@ -186,15 +190,19 @@ function DataGridImpl({
     column: string;
   } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
 
-  // Delete/Backspace deletes the current multi-selection, but only when the grid (not a cell input
-  // or another surface) has focus, and only if bulk delete is wired (editable table card).
+  // The delete-rows binding deletes the current multi-selection, but only when the grid (not a cell
+  // input or another surface) has focus, and only if bulk delete is wired (editable table card).
+  // The PC forward-Delete key is a fixed alias regardless of the rebindable Backspace default.
   useEffect(() => {
     if (!onDeleteRows) {
       return;
     }
+    const deleteBinding = resolveShortcuts(shortcuts)["delete-rows"];
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Delete" && event.key !== "Backspace") {
+      if (event.key !== "Delete" && !matchesHotkey(event, deleteBinding)) {
         return;
       }
       if (isEditableTarget(event.target) || selectedRows.size === 0) {
@@ -208,7 +216,7 @@ function DataGridImpl({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onDeleteRows, selectedRows]);
+  }, [onDeleteRows, selectedRows, shortcuts]);
 
   const data = useMemo(
     () =>

@@ -1,4 +1,9 @@
 import type { SplitOrientation } from "@/components/workspace/workspace-context";
+import {
+  SHORTCUT_ACTIONS,
+  type ShortcutOverrides,
+} from "@/lib/shortcuts/registry";
+import { safeNormalize } from "@/lib/shortcuts/resolve";
 
 export type PanelLayout = Record<string, number>;
 
@@ -76,6 +81,7 @@ export type Settings = {
   openTabIds: string[];
   activeTabId: string | null;
   theme: ThemeSettings;
+  shortcuts: ShortcutOverrides;
 };
 
 export type SettingsStore = {
@@ -97,7 +103,27 @@ export const DEFAULT_SETTINGS: Settings = {
   openTabIds: [],
   activeTabId: null,
   theme: { mode: "system", colors: emptyThemeColors() },
+  shortcuts: {},
 };
+
+const SHORTCUT_ACTION_IDS = new Set<string>(
+  SHORTCUT_ACTIONS.map((action) => action.id),
+);
+
+function mergeShortcuts(value: unknown): ShortcutOverrides {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.entries(value).reduce<ShortcutOverrides>((acc, [id, raw]) => {
+    if (!SHORTCUT_ACTION_IDS.has(id) || typeof raw !== "string") {
+      return acc;
+    }
+    const normalized = safeNormalize(raw);
+    return normalized === null
+      ? acc
+      : { ...acc, [id as keyof ShortcutOverrides]: normalized };
+  }, {});
+}
 
 const THEME_MODES = new Set<string>(["light", "dark", "system"]);
 
@@ -259,5 +285,6 @@ export function mergeSettings(defaults: Settings, partial: unknown): Settings {
     openTabIds,
     activeTabId,
     theme: mergeTheme(defaults.theme, partial.theme),
+    shortcuts: mergeShortcuts(partial.shortcuts),
   };
 }
