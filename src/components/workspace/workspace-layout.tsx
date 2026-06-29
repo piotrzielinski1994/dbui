@@ -11,6 +11,11 @@ import { NewFolderDialog } from "@/components/workspace/new-folder-dialog";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useThemeToggle } from "@/lib/theme/theme-context";
 import { Toaster } from "@/components/ui/sonner";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
+import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 
 export function WorkspaceLayout() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
@@ -27,8 +32,13 @@ export function WorkspaceLayout() {
     layouts,
     saveLayout,
     accentColorFor,
+    openTabIds,
+    setActiveTab,
+    closeTab,
   } = useWorkspace();
   const toggleTheme = useThemeToggle();
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
   const isSplitView =
     activeNode?.kind === "database" && activeDatabaseTab === "sql";
   // The accent recolours the existing 1px borders by overriding the --border token (every divider/
@@ -38,53 +48,63 @@ export function WorkspaceLayout() {
   const accentBorder = activeTabId ? accentColorFor(activeTabId) : null;
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) {
+    const effective = resolveShortcuts(shortcuts);
+    const cycleTab = (step: number) => {
+      if (openTabIds.length === 0) {
         return;
       }
-      if (event.key === "k") {
-        event.preventDefault();
-        setIsPaletteOpen(true);
-        return;
-      }
-      if (event.key === "b") {
-        event.preventDefault();
-        toggleSidebar();
-        return;
-      }
-      if (event.key === "j") {
-        event.preventDefault();
-        toggleConsole();
-        return;
-      }
-      if (event.shiftKey && event.key.toLowerCase() === "l") {
-        event.preventDefault();
-        toggleTheme();
-        return;
-      }
-      if (event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          setIsFolderDialogOpen(true);
-          return;
+      const current =
+        activeTabId !== null ? openTabIds.indexOf(activeTabId) : -1;
+      const length = openTabIds.length;
+      const next = (((current + step) % length) + length) % length;
+      setActiveTab(openTabIds[next]);
+    };
+    // global + tab scopes both dispatch off the document/window keydown; their
+    // callbacks self-guard (split only in split view, close only with an active tab).
+    const dispatch: Partial<Record<ShortcutActionId, () => void>> = {
+      "open-command-palette": () => setIsPaletteOpen(true),
+      "toggle-sidebar": toggleSidebar,
+      "toggle-console": toggleConsole,
+      "toggle-theme": toggleTheme,
+      "new-database": addDatabase,
+      "new-folder": () => setIsFolderDialogOpen(true),
+      "toggle-split-orientation": () => {
+        if (isSplitView) {
+          toggleSplitOrientation();
         }
-        addDatabase();
+      },
+      "next-tab": () => cycleTab(1),
+      "prev-tab": () => cycleTab(-1),
+      "close-tab": () => {
+        if (activeTabId !== null) {
+          closeTab(activeTabId);
+        }
+      },
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const hit = (Object.keys(dispatch) as ShortcutActionId[]).find((id) =>
+        matchesHotkey(event, effective[id]),
+      );
+      if (hit === undefined) {
         return;
       }
-      if (event.key === "\\" && isSplitView) {
-        event.preventDefault();
-        toggleSplitOrientation();
-      }
+      event.preventDefault();
+      dispatch[hit]?.();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    shortcuts,
     isSplitView,
     toggleSplitOrientation,
     toggleSidebar,
     toggleConsole,
     addDatabase,
     toggleTheme,
+    openTabIds,
+    activeTabId,
+    setActiveTab,
+    closeTab,
   ]);
 
   return (

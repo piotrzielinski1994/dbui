@@ -35,6 +35,10 @@ import {
 } from "@/lib/workspace/tree-locate";
 import { isEditableTarget } from "@/lib/workspace/is-editable-target";
 import { dragOverlayLabel } from "@/lib/workspace/drag-overlay-label";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
 import type { TreeNode } from "@/lib/workspace/model";
 
 function pointerY(event: DragOverEvent): number | null {
@@ -78,6 +82,8 @@ export function SidebarTree() {
     addDatabase,
     createFolder,
   } = useWorkspace();
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
   // The nodes the confirm dialog is about to delete (a right-click target or the live selection).
   const [pendingDelete, setPendingDelete] = useState<TreeNode[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -103,11 +109,13 @@ export function SidebarTree() {
     [selectedIds, tree],
   );
 
-  // Backspace/Delete (macOS delete sends Backspace) with a non-empty selection opens the bulk
-  // confirm dialog, unless focus is in a text input.
+  // The delete-nodes binding (default Backspace; macOS delete sends Backspace) with a non-empty
+  // selection opens the bulk confirm dialog, unless focus is in a text input. The PC forward-Delete
+  // key is a fixed alias regardless of the rebindable Backspace default.
   useEffect(() => {
+    const deleteBinding = resolveShortcuts(shortcuts)["delete-nodes"];
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Backspace" && event.key !== "Delete") {
+      if (event.key !== "Delete" && !matchesHotkey(event, deleteBinding)) {
         return;
       }
       if (isEditableTarget(event.target) || selectedIds.size === 0) {
@@ -124,7 +132,7 @@ export function SidebarTree() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedIds, tree]);
+  }, [selectedIds, tree, shortcuts]);
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id));

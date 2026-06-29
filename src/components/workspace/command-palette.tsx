@@ -1,9 +1,13 @@
+import { formatForDisplay } from "@tanstack/react-hotkeys";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import { useThemeToggle } from "@/lib/theme/theme-context";
 import {
   PALETTE_COMMANDS,
   type PaletteCommandId,
 } from "@/components/workspace/command-registry";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import {
   CommandDialog,
   CommandEmpty,
@@ -71,6 +75,10 @@ export function CommandPalette({
     "toggle-theme": toggleTheme,
   };
 
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
+  const effective = resolveShortcuts(shortcuts);
+
   const isSplitView =
     activeNode?.kind === "database" && activeDatabaseTab === "sql";
   const state = { openTabCount: openTabIds.length, isSplitView };
@@ -91,7 +99,11 @@ export function CommandPalette({
             }}
           >
             <span>{def.name}</span>
-            {def.hint && <CommandShortcut>{def.hint}</CommandShortcut>}
+            {def.actionId && (
+              <CommandShortcut>
+                {formatForDisplay(effective[def.actionId])}
+              </CommandShortcut>
+            )}
           </CommandItem>
         ))}
       </CommandList>

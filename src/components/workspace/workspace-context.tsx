@@ -509,7 +509,7 @@ type WorkspaceProviderProps = {
   initialLayouts?: Settings["layouts"];
   // The workspace persists only the UI-chrome slice of Settings; the theme is owned by the
   // ThemeProvider, so it is not part of this payload (the route folds it back in).
-  onPersist?: (settings: Omit<Settings, "theme">) => void;
+  onPersist?: (settings: Omit<Settings, "theme" | "shortcuts">) => void;
   onTreeChange?: (tree: TreeNode[]) => void;
 };
 

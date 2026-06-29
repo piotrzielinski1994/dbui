@@ -25,6 +25,7 @@ const nonDefaultSettings: Settings = {
       dark: { tokens: {}, editor: {} },
     },
   },
+  shortcuts: {},
 };
 
 // Renders the live settings as JSON and exposes a button to persist a target

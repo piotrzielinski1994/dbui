@@ -12,13 +12,16 @@ export function HomePage() {
   const { tree, persistTree } = useWorkspaceStore();
 
   // The workspace persists only the UI-chrome slice of Settings; preserve the theme (owned by the
-  // ThemeProvider / theme.json) so a chrome write doesn't clobber it back to a theme-less object.
-  // Memoized + keyed on the stable `theme` reference so its identity doesn't change on a chrome
-  // write (which would re-fire the provider's persist effect and loop).
+  // ThemeProvider / theme.json) and the shortcuts (owned by the Settings page / keymap.json) so a
+  // chrome write doesn't clobber either back to defaults. Memoized + keyed on their stable
+  // references so identity doesn't change on a chrome write (which would re-fire the provider's
+  // persist effect and loop).
   const theme = settings.theme;
+  const shortcuts = settings.shortcuts;
   const persistChrome = useCallback(
-    (next: Omit<Settings, "theme">) => persist({ ...next, theme }),
-    [persist, theme],
+    (next: Omit<Settings, "theme" | "shortcuts">) =>
+      persist({ ...next, theme, shortcuts }),
+    [persist, theme, shortcuts],
   );
 
   return (

@@ -16,10 +16,14 @@ export type PaletteState = {
   isSplitView: boolean;
 };
 
+import type { ShortcutActionId } from "@/lib/shortcuts/registry";
+
 export type PaletteCommandDef = {
   id: PaletteCommandId;
   name: string;
-  hint?: string;
+  // The registry action whose effective binding supplies the displayed hint;
+  // commands with no bound shortcut (e.g. new-tab, close-all-tabs) omit it.
+  actionId?: ShortcutActionId;
   when: (state: PaletteState) => boolean;
 };
 
@@ -30,47 +34,52 @@ export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
   {
     id: "new-database",
     name: "New database",
-    hint: "Cmd/Ctrl+N",
+    actionId: "new-database",
     when: () => true,
   },
   {
     id: "new-folder",
     name: "New folder",
-    hint: "Cmd/Ctrl+Shift+N",
+    actionId: "new-folder",
     when: () => true,
   },
-  { id: "close-tab", name: "Close tab", hint: "Ctrl+W", when: hasTabs },
+  { id: "close-tab", name: "Close tab", actionId: "close-tab", when: hasTabs },
   { id: "close-all-tabs", name: "Close all tabs", when: hasTabs },
-  { id: "next-tab", name: "Next tab", hint: "Tab", when: hasMultipleTabs },
+  {
+    id: "next-tab",
+    name: "Next tab",
+    actionId: "next-tab",
+    when: hasMultipleTabs,
+  },
   {
     id: "prev-tab",
     name: "Previous tab",
-    hint: "Shift+Tab",
+    actionId: "prev-tab",
     when: hasMultipleTabs,
   },
   { id: "new-tab", name: "New tab", when: () => true },
   {
     id: "toggle-split-orientation",
     name: "Toggle split layout (rows / columns)",
-    hint: "Cmd/Ctrl+\\",
+    actionId: "toggle-split-orientation",
     when: (state) => state.isSplitView,
   },
   {
     id: "toggle-sidebar",
     name: "Toggle sidebar",
-    hint: "Cmd/Ctrl+B",
+    actionId: "toggle-sidebar",
     when: () => true,
   },
   {
     id: "toggle-console",
     name: "Toggle console panel",
-    hint: "Cmd/Ctrl+J",
+    actionId: "toggle-console",
     when: () => true,
   },
   {
     id: "toggle-theme",
     name: "Toggle theme",
-    hint: "Cmd/Ctrl+Shift+L",
+    actionId: "toggle-theme",
     when: () => true,
   },
 ];

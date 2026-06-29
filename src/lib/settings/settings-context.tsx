@@ -138,3 +138,10 @@ export function useSettings(): SettingsContextValue {
   }
   return value;
 }
+
+// Returns null outside a SettingsProvider instead of throwing - lets the workspace
+// layout read shortcut overrides while still rendering in isolation (tests, or any
+// subtree mounted without the root provider), falling back to the registry defaults.
+export function useSettingsOptional(): SettingsContextValue | null {
+  return useContext(SettingsContext);
+}
