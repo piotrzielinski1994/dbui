@@ -83,6 +83,36 @@ or recurring domain shape. Recorded in Decision Log.
 - Manual smoke: rebind a global shortcut, see it fire; rebind delete in grid vs tree
   independently; palette hints reflect overrides.
 
+## AC traceability (verified)
+
+| AC | Test(s) |
+| -- | ------- |
+| AC-001 | `registry.test.ts` - ids/scopes/defaults |
+| AC-002 | `resolve.test.ts` - resolveShortcuts override/fallback |
+| AC-003 | `resolve.test.ts` - findConflict per-scope (TC-004/005) |
+| AC-004 | `to-codemirror-key.test.ts` |
+| AC-005 | `settings-shortcuts.test.ts` - merge validation |
+| AC-006 | `tauri-store.ts` keymap.json split (mirrors untested theme split) |
+| AC-007 | `settings-context-shortcuts.test.tsx` - save/reset |
+| AC-008 | `shortcuts-section.test.tsx` - heading + rows |
+| AC-009 | `shortcuts-section.test.tsx` - Reset visibility |
+| AC-010 | `match-hotkey.test.ts` + `command-palette-hints.test.tsx` (real keydown dispatch) |
+| AC-011 | `command-palette-hints.test.tsx` - derived hints |
+
+## Deviations from plan
+
+- Dispatch does NOT use `useHotkeys` with a `target` ref. jsdom resolves the test
+  platform to "linux" (so TanStack maps `Mod`->Control only), while every existing
+  dbui shortcut test fires `metaKey` OR `ctrlKey` interchangeably. A hand-rolled
+  `matchesHotkey` (where `Mod` = meta||ctrl) on each component's existing
+  window-keydown listener keeps all prior tests green and is the smaller change. The
+  lib is still used for the recorder, normalize/validate, and `formatForDisplay`.
+- Added `useSettingsOptional` (mirrors the existing `useThemeOptional`) so the
+  workspace/grid/tree render outside a SettingsProvider (isolated tests) by falling
+  back to `DEFAULT_SETTINGS.shortcuts`.
+- Added `match-hotkey.ts` (+ test) - not in the original file list, needed for the
+  dispatch approach above.
+
 ## Risks
 
 - jsdom can't fire real hotkeys / CM keymaps → behavioral coverage stays at pure-logic
