@@ -32,18 +32,39 @@ async fn connect_database(
     connection_id: String,
     config: serde_json::Value,
 ) -> Result<Vec<TableRef>, String> {
-    if config_engine(&config) == Some("mongodb") {
-        let mongo_config: MongoConfig =
-            serde_json::from_value(config).map_err(|error| error.to_string())?;
-        return mongo::connect(connection_id, mongo_config).await;
+    let engine = config_engine(&config).unwrap_or("?").to_string();
+    let started = std::time::Instant::now();
+    // A deserialize failure folds into `result` (not an early `?`) so it is logged like any other
+    // connect failure, per AC-002.
+    let result = if engine == "mongodb" {
+        match serde_json::from_value::<MongoConfig>(config) {
+            Ok(mongo_config) => mongo::connect(connection_id.clone(), mongo_config).await,
+            Err(error) => Err(error.to_string()),
+        }
+    } else {
+        match serde_json::from_value::<ConnectionConfig>(config) {
+            Ok(sql_config) => connect_database_db(connection_id.clone(), sql_config).await,
+            Err(error) => Err(error.to_string()),
+        }
+    };
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Ok(tables) => log::info!(
+            "{}",
+            logging::format_connect_ok(&connection_id, &engine, tables.len(), ms)
+        ),
+        Err(error) if !logging::is_cancel_sentinel(error) => log::error!(
+            "{}",
+            logging::format_connect_err(&connection_id, &engine, ms, error)
+        ),
+        Err(_) => {}
     }
-    let sql_config: ConnectionConfig =
-        serde_json::from_value(config).map_err(|error| error.to_string())?;
-    connect_database_db(connection_id, sql_config).await
+    result
 }
 
 #[tauri::command]
 async fn disconnect_database(connection_id: String) {
+    log::info!("{}", logging::format_disconnect(&connection_id));
     if mongo::is_connected(&connection_id) {
         mongo::disconnect(connection_id).await;
         return;
@@ -104,10 +125,27 @@ async fn apply_mutations(
     table: String,
     mutations: Vec<RowMutation>,
 ) -> Result<u64, String> {
-    if mongo::is_connected(&connection_id) {
-        return mongo::apply_mutations(connection_id, table, mutations).await;
+    let qualified = match &schema {
+        Some(schema) => format!("{schema}.{table}"),
+        None => table.clone(),
+    };
+    let started = std::time::Instant::now();
+    let result = if mongo::is_connected(&connection_id) {
+        mongo::apply_mutations(connection_id.clone(), table, mutations).await
+    } else {
+        apply_row_mutations(connection_id.clone(), schema, table, mutations).await
+    };
+    let ms = started.elapsed().as_millis();
+    match &result {
+        Ok(affected) => log::info!(
+            "{}",
+            logging::format_mutations(&connection_id, &qualified, *affected, ms)
+        ),
+        Err(error) => log::error!(
+            "mutations id={connection_id} table={qualified} failed ({ms}ms): {error}"
+        ),
     }
-    apply_row_mutations(connection_id, schema, table, mutations).await
+    result
 }
 
 // Runs one or more `;`-separated statements on the held connection, returning one outcome per
@@ -118,7 +156,35 @@ async fn execute_sql(
     sql: String,
     request_id: String,
 ) -> Result<Vec<QueryOutcome>, String> {
-    run_query(connection_id, sql, DEFAULT_ROW_LIMIT, request_id).await
+    let started = std::time::Instant::now();
+    let result = run_query(connection_id.clone(), sql, DEFAULT_ROW_LIMIT, request_id).await;
+    log_query_outcome("sql", &connection_id, started, &result);
+    result
+}
+
+// One file-log line per query invocation (NOT per `;`-statement - the in-app History tab already
+// gives per-statement granularity). A cancelled run logs nothing (neutral). Shared by SQL + Mongo.
+fn log_query_outcome(
+    kind: &str,
+    connection_id: &str,
+    started: std::time::Instant,
+    result: &Result<Vec<QueryOutcome>, String>,
+) {
+    let ms = started.elapsed().as_millis();
+    match result {
+        Ok(outcomes) => {
+            let rows = outcomes.iter().map(|outcome| outcome.rows.len()).sum();
+            log::info!(
+                "{}",
+                logging::format_query_ok(kind, connection_id, outcomes.len(), rows, ms)
+            )
+        }
+        Err(error) if !logging::is_cancel_sentinel(error) => log::error!(
+            "{}",
+            logging::format_query_err(kind, connection_id, ms, error)
+        ),
+        Err(_) => {}
+    }
 }
 
 // Runs one or more `;`-separated MongoDB Query-tab commands (`db.<coll>.find({...})` /
@@ -130,7 +196,10 @@ async fn execute_mongo(
     command: String,
     request_id: String,
 ) -> Result<Vec<QueryOutcome>, String> {
-    mongo::run_query(connection_id, command, DEFAULT_ROW_LIMIT, request_id).await
+    let started = std::time::Instant::now();
+    let result = mongo::run_query(connection_id.clone(), command, DEFAULT_ROW_LIMIT, request_id).await;
+    log_query_outcome("mongo", &connection_id, started, &result);
+    result
 }
 
 #[tauri::command]
