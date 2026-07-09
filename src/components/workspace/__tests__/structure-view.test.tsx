@@ -32,6 +32,7 @@ const fullStructure: TableStructure = {
       name: "users_org_fk",
       columns: ["org_id"],
       referencedTable: "organizations",
+      referencedSchema: null,
       referencedColumns: ["id"],
     },
   ],

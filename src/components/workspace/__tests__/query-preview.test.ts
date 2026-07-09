@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   queryPreview,
   rowsToInsertSql,
+  fkFilter,
 } from "@/components/workspace/query-preview";
 
 describe("queryPreview SQL strategy", () => {
@@ -147,5 +148,33 @@ describe("rowsToInsertSql (F15 Copy as SQL)", () => {
   it("should return an empty string for no rows", () => {
     const preview = queryPreview("postgres", "public");
     expect(rowsToInsertSql(preview, "users", columns, [])).toBe("");
+  });
+});
+
+describe("fkFilter (F13 FK navigation filter)", () => {
+  // AC-009, TC-009 - behavior: a single column builds `"<ident>" = '<literal>'` with double-quoted
+  // identifiers for postgres.
+  it("should build a double-quoted equality fragment for a single postgres column", () => {
+    expect(fkFilter("postgres", ["id"], ["42"])).toBe(`"id" = '42'`);
+  });
+
+  // AC-003, TC-002 - behavior: multiple referenced columns are AND-joined in order.
+  it("should AND-join a composite referenced-column fragment", () => {
+    expect(fkFilter("postgres", ["x", "y"], ["1", "2"])).toBe(
+      `"x" = '1' AND "y" = '2'`,
+    );
+  });
+
+  // AC-009, TC-009 - behavior: an embedded single quote in the value is doubled so the SQL literal
+  // stays valid.
+  it("should double an embedded single quote in the value", () => {
+    expect(fkFilter("postgres", ["name"], ["O'Brien"])).toBe(
+      `"name" = 'O''Brien'`,
+    );
+  });
+
+  // AC-009, TC-009 - behavior: MySQL quotes identifiers with backticks.
+  it("should backtick-quote identifiers for a mysql fragment", () => {
+    expect(fkFilter("mysql", ["id"], ["42"])).toBe("`id` = '42'");
   });
 });

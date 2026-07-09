@@ -47,7 +47,12 @@ import {
   useWorkspace,
   type PendingMutation,
 } from "@/components/workspace/workspace-context";
-import { queryPreview, rowsToInsertSql } from "@/components/workspace/query-preview";
+import {
+  fkFilter,
+  queryPreview,
+  rowsToInsertSql,
+} from "@/components/workspace/query-preview";
+import { fkTargetTableId } from "@/lib/workspace/foreign-key-nav";
 import { JsonView } from "@/components/workspace/json-view";
 import { StructureView } from "@/components/workspace/structure-view";
 import {
@@ -62,6 +67,7 @@ import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
 import type {
   ConnectionConfig,
+  ForeignKey,
   Sort,
   TableNode,
   TableRows,
@@ -187,6 +193,8 @@ function TableView({
   onEditDocument,
   onCopySql,
   copySqlLabel,
+  foreignKeys,
+  onFollowForeignKey,
   jsonRows,
   onSaveJson,
 }: {
@@ -207,6 +215,8 @@ function TableView({
   onEditDocument?: (rowIndex: number) => void;
   onCopySql?: (rowIndices: number[]) => void;
   copySqlLabel?: string;
+  foreignKeys?: ForeignKey[];
+  onFollowForeignKey?: (fk: ForeignKey, rowIndex: number) => void;
   // The rows the JSON view shows/diffs (saved rows only - drafts stay in the grid). Defaults to
   // `rows` when omitted (the static path, where grid rows and saved rows are the same).
   jsonRows?: Cell[][];
@@ -358,6 +368,8 @@ function TableView({
         onCopyRows={copyRows}
         onCopySql={onCopySql}
         copySqlLabel={copySqlLabel}
+        foreignKeys={foreignKeys}
+        onFollowForeignKey={onFollowForeignKey}
         shortcuts={shortcuts}
       />
     </ScrollArea>
@@ -422,6 +434,9 @@ function LiveTable({
     discardPendingEdit,
     discardPendingEditsForTable,
     addHistoryEntry,
+    openNode,
+    setTableFilter,
+    nodesById,
   } = useWorkspace();
   const { isStructureView, toggleStructureView } = useStructureView();
   // The structure toggle listener lives HERE, not in TableView, because turning the view on
@@ -444,17 +459,19 @@ function LiveTable({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [structureShortcuts, toggleStructureView]);
+  const isMongo = config.engine === "mongodb";
   const structure = useQuery<TableStructure, Error>({
     queryKey: ["table-structure", tableId],
     queryFn: () => fetchTableStructure(connectionId, tableName, schema),
-    // Lazy: only fetched once the Structure view is opened (AC-010), never for tables never inspected.
-    enabled: isStructureView,
+    // Fetched when the Structure view opens; ALSO eagerly for SQL tables so FK navigation (the "Go
+    // to" row menu + the FK header marker) has the foreign keys on first render. Mongo stays lazy -
+    // it has no foreign keys, so nothing needs them before the Structure view opens.
+    enabled: isStructureView || !isMongo,
     staleTime: Infinity,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [sort, setSort] = useState<Sort | null>(null);
   const [pageSize, setPageSize] = useState(ROW_LIMIT);
-  const isMongo = config.engine === "mongodb";
   // The row whose full document is open in the JSON editor dialog (MongoDB only), or null.
   const [editingDoc, setEditingDoc] = useState<{
     rowIndex: number;
@@ -606,6 +623,16 @@ function LiveTable({
     () => (columns ? columns.map((column) => column.name) : []),
     [columns],
   );
+  // The open table's outbound foreign keys (SQL only - Mongo returns none). Powers the FK header
+  // marker + the "Go to" row-menu items. Empty until the (eager, for SQL) structure query resolves.
+  const foreignKeys = useMemo<ForeignKey[]>(
+    () => structure.data?.foreignKeys ?? [],
+    [structure.data],
+  );
+  const fkColumns = useMemo(
+    () => new Set(foreignKeys.flatMap((fk) => fk.columns)),
+    [foreignKeys],
+  );
   const columnMeta = useMemo(
     () =>
       Object.fromEntries(
@@ -615,10 +642,11 @@ function LiveTable({
             dataType: column.dataType,
             nullable: column.nullable,
             isPrimaryKey: column.isPrimaryKey,
+            isForeignKey: fkColumns.has(column.name),
           },
         ]),
       ),
-    [columns],
+    [columns, fkColumns],
   );
 
   const primaryKey = data?.pages[0]?.primaryKey ?? null;
@@ -654,6 +682,42 @@ function LiveTable({
       );
     },
     [gridRows, preview, tableName, columnNames],
+  );
+
+  // Navigate a foreign key: open (or re-activate) the referenced table's tab and apply a WHERE
+  // filter pinning the referenced row(s) by the FK's referenced column(s) = the source row's value(s).
+  // The target node must already be in the loaded catalog (same DB); an unresolved target toasts and
+  // does nothing rather than opening a blank tab.
+  const followForeignKey = useCallback(
+    (fk: ForeignKey, rowIndex: number) => {
+      const row = gridRows[rowIndex];
+      if (!row) {
+        return;
+      }
+      const values = fk.columns.map((column) => {
+        const index = columnNames.indexOf(column);
+        return index >= 0 ? (row[index] ?? null) : null;
+      });
+      const targetId = fkTargetTableId(connectionId, fk);
+      if (!nodesById.has(targetId)) {
+        toast.error(`Table '${fk.referencedTable}' is not loaded`);
+        return;
+      }
+      openNode(targetId);
+      setTableFilter(
+        targetId,
+        fkFilter(config.engine, fk.referencedColumns, values),
+      );
+    },
+    [
+      gridRows,
+      columnNames,
+      connectionId,
+      config.engine,
+      nodesById,
+      openNode,
+      setTableFilter,
+    ],
   );
 
   const isDraftRow = useCallback(
@@ -1075,6 +1139,8 @@ function LiveTable({
             onEditDocument={editable && isMongo ? openDocEditor : undefined}
             onCopySql={copySql}
             copySqlLabel={isMongo ? "Copy insert" : "Copy SQL"}
+            foreignKeys={foreignKeys}
+            onFollowForeignKey={followForeignKey}
           />
         )}
       </div>

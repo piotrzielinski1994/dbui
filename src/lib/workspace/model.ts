@@ -103,6 +103,9 @@ export type ForeignKey = {
   name: string;
   columns: string[];
   referencedTable: string;
+  // The referenced table's schema (Postgres); null for MySQL/SQLite. Used to resolve the target
+  // table node id when navigating a foreign key.
+  referencedSchema: string | null;
   referencedColumns: string[];
 };
 

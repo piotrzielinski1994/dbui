@@ -164,15 +164,14 @@ beforeEach(() => {
 });
 
 describe("TableCard structure view", () => {
-  // AC-010 - behavior: structure is NOT fetched until the view is opened (lazy).
-  it("should not fetch structure until the view is opened", async () => {
+  // F13 - behavior: a SQL table fetches its structure eagerly (not gated on the Structure view) so
+  // FK navigation - the "Go to" row menu + the FK header marker - has the foreign keys on first
+  // render. (Mongo stays lazy; it has no foreign keys.)
+  it("should fetch structure eagerly for a SQL table so FK navigation has the foreign keys", async () => {
     renderCard();
     await screen.findAllByText("id");
-    expect(mockStructure).not.toHaveBeenCalled();
 
-    toggleRef.current();
-
-    await waitFor(() => expect(mockStructure).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockStructure).toHaveBeenCalled());
   });
 
   // AC-009 - behavior: opening the structure view shows the metadata sections over the grid.

@@ -28,7 +28,8 @@ import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { matchesHotkey } from "@/lib/shortcuts/match-hotkey";
 import type { ShortcutOverrides } from "@/lib/shortcuts/registry";
 import type { RowSelectMode } from "@/lib/workspace/row-select";
-import type { Sort, TableColumn } from "@/lib/workspace/model";
+import { navigableForeignKeys } from "@/lib/workspace/foreign-key-nav";
+import type { ForeignKey, Sort, TableColumn } from "@/lib/workspace/model";
 
 // Which selection mode a row click implies: Shift = range, Cmd/Ctrl = toggle, plain = replace.
 function rowSelectModeOf(event: {
@@ -51,7 +52,11 @@ type Row = Record<string, Cell>;
 export type ColumnMeta = Pick<
   TableColumn,
   "dataType" | "nullable" | "isPrimaryKey"
->;
+> & {
+  // True when this column is (part of) an outbound foreign key - marked `FK` in the header so the
+  // navigable link is discoverable. Optional: absent/false for non-FK columns and static grids.
+  isForeignKey?: boolean;
+};
 
 const columnHelper = createColumnHelper<Row>();
 
@@ -80,7 +85,11 @@ function sortGlyph(sort: Sort | null | undefined, column: string): string {
 }
 
 function columnMarkers(meta: ColumnMeta): string {
-  const markers = [meta.isPrimaryKey ? "PK" : null, !meta.nullable ? "NN" : null]
+  const markers = [
+    meta.isPrimaryKey ? "PK" : null,
+    meta.isForeignKey ? "FK" : null,
+    !meta.nullable ? "NN" : null,
+  ]
     .filter((marker): marker is string => marker !== null)
     .join(" ");
   return [meta.dataType, markers].filter(Boolean).join(" ");
@@ -156,6 +165,8 @@ function DataGridImpl({
   onCopyRows,
   onCopySql,
   copySqlLabel = "Copy SQL",
+  foreignKeys,
+  onFollowForeignKey,
   shortcuts,
 }: {
   columns: string[];
@@ -190,6 +201,11 @@ function DataGridImpl({
   onCopySql?: (rowIndices: number[]) => void;
   // The SQL-copy item's label - "Copy SQL" for SQL engines, "Copy insert" for MongoDB.
   copySqlLabel?: string;
+  // The open table's outbound foreign keys (live SQL tables only). When present with
+  // onFollowForeignKey, the row menu offers a "Go to <refTable>" item per FK with non-null value(s).
+  foreignKeys?: ForeignKey[];
+  // Navigate to the referenced row of the given foreign key from the given source row.
+  onFollowForeignKey?: (fk: ForeignKey, rowIndex: number) => void;
   // The resolved shortcut OVERRIDES map, passed in as a prop (not read via useSettingsOptional here)
   // so this memoized grid does NOT subscribe to the Settings context - a chrome toggle rebuilds the
   // settings value, and a context consumer would re-render all 200 rows despite memo. The callers'
@@ -338,8 +354,13 @@ function DataGridImpl({
             // Row context menu only when mutations are wired (onDeleteRow / onEditDocument) and the
             // row is a saved one - draft rows are discarded via the Changes tab, not a delete.
             const hasRowMenu =
-              Boolean(onDeleteRow || onEditDocument || onCopyRows || onCopySql) &&
-              !isDraft;
+              Boolean(
+                onDeleteRow ||
+                  onEditDocument ||
+                  onCopyRows ||
+                  onCopySql ||
+                  onFollowForeignKey,
+              ) && !isDraft;
             const rowElement = (
               <tr
                 aria-selected={selectedRows.has(row.index)}
@@ -486,6 +507,33 @@ function DataGridImpl({
                               >
                                 {`${copySqlLabel}${suffix}`}
                               </ContextMenuItem>
+                            );
+                          })()
+                        : null}
+                      {onFollowForeignKey && foreignKeys
+                        ? (() => {
+                            const navigable = navigableForeignKeys(
+                              foreignKeys,
+                              columns,
+                              rows[row.index] ?? [],
+                            );
+                            if (navigable.length === 0) {
+                              return null;
+                            }
+                            return (
+                              <>
+                                <ContextMenuSeparator />
+                                {navigable.map(({ fk, label }) => (
+                                  <ContextMenuItem
+                                    key={fk.name}
+                                    onSelect={() =>
+                                      onFollowForeignKey(fk, row.index)
+                                    }
+                                  >
+                                    {label}
+                                  </ContextMenuItem>
+                                ))}
+                              </>
                             );
                           })()
                         : null}

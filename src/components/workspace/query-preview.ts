@@ -147,6 +147,22 @@ export function queryPreview(
   return engine === "mongodb" ? mongoPreview() : sqlPreview(engine, schema);
 }
 
+// Builds the WHERE fragment that pins a foreign-key target row: `<refCol> = <value>` per referenced
+// column, AND-joined, with engine-correct identifier quoting and value escaping. Consumed by FK
+// navigation as the applied filter on the referenced table.
+export function fkFilter(
+  engine: ConnectionConfig["engine"],
+  referencedColumns: string[],
+  values: Cell[],
+): string {
+  return referencedColumns
+    .map(
+      (column, index) =>
+        `${quoteIdent(engine, column)} = ${sqlLiteral(values[index] ?? null)}`,
+    )
+    .join(" AND ");
+}
+
 // Serialises the given rows as one insert statement per row via the engine's preview strategy - a
 // SQL `INSERT INTO ... VALUES (...)` for the SQL engines, a `db.<coll>.insertOne({...})` for
 // MongoDB - each terminated with `;` and newline-joined. Every column is included per row (column
