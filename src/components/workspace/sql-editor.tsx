@@ -143,9 +143,18 @@ function mongoCommandSource(
       const word = context.matchBefore(/\w*$/);
       return {
         from: word ? word.from : context.pos,
+        // Reads first, then the write ops the Query tab now runs (find/aggregate + insert/update/
+        // delete/replace) - blocked on a read-only connection but always offered.
         options: [
           { label: "find", type: "method" },
           { label: "aggregate", type: "method" },
+          { label: "insertOne", type: "method" },
+          { label: "insertMany", type: "method" },
+          { label: "updateOne", type: "method" },
+          { label: "updateMany", type: "method" },
+          { label: "deleteOne", type: "method" },
+          { label: "deleteMany", type: "method" },
+          { label: "replaceOne", type: "method" },
         ],
         validFor: /^\w*$/,
       };
@@ -165,7 +174,9 @@ function mongoCommandSource(
     // (no closing quote yet) marks a key position.
     const fieldKey = beforeCursor.match(/"[\w$.]*$/);
     if (fieldKey) {
-      const command = beforeCursor.match(/db\.([\w$-]+)\.(?:find|aggregate)\b/);
+      const command = beforeCursor.match(
+        /db\.([\w$-]+)\.(?:find|aggregate|insertOne|insertMany|updateOne|updateMany|deleteOne|deleteMany|replaceOne)\b/,
+      );
       const collectionName = command?.[1] ?? defaultCollection;
       const table = schema.find((entry) => entry.name === collectionName);
       if (!table) {

@@ -145,6 +145,7 @@ type WorkspaceContextValue = {
   clearSelection: () => void;
   renameDatabase: (id: string, name: string) => void;
   setDatabaseAccent: (id: string, color: string | null) => void;
+  setDatabaseReadOnly: (id: string, readOnly: boolean) => void;
   saveScript: (databaseId: string, name: string, sql: string) => boolean;
   // Overwrite the sql of an EXISTING saved script (matched by name). Used when Cmd/Ctrl+S is pressed
   // while a named script is the active document - it saves in place, no name prompt.
@@ -163,6 +164,11 @@ type WorkspaceContextValue = {
   sqlBuffers: Map<string, string>;
   setSqlBuffer: (key: string, sql: string) => void;
   clearSqlBuffer: (key: string) => void;
+  // Per-table APPLIED filter, keyed by tableId, kept in the provider so the filter survives the
+  // table card unmounting on a content-tab switch (the card is a singleton keyed on the active node,
+  // so its own state would otherwise reset). In-memory only - filters are ephemeral, not persisted.
+  tableFilters: Map<string, string>;
+  setTableFilter: (tableId: string, filter: string) => void;
   // JS saved-script document tabs (F7), mirroring the SQL saveScript/... family but keyed on `code`.
   saveJsScript: (databaseId: string, name: string, code: string) => boolean;
   updateJsScript: (databaseId: string, name: string, code: string) => void;
@@ -327,6 +333,7 @@ function applyDatabaseConfig(
         id,
         name,
         accentColor,
+        readOnly,
         tables,
         views,
         sql,
@@ -339,6 +346,7 @@ function applyDatabaseConfig(
         id,
         name,
         accentColor,
+        readOnly,
         tables,
         views,
         sql,
@@ -358,6 +366,7 @@ function newDatabaseNode(id: string): DatabaseNode {
     id,
     name: "new_database",
     accentColor: null,
+    readOnly: false,
     engine: "postgres",
     host: "localhost",
     port: 5432,
@@ -454,6 +463,25 @@ function setAccentColor(
     }
     if (node.kind === "database" && node.id === databaseId) {
       return { ...node, accentColor };
+    }
+    return node;
+  });
+}
+
+function setReadOnly(
+  nodes: TreeNode[],
+  databaseId: string,
+  readOnly: boolean,
+): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind === "folder") {
+      return {
+        ...node,
+        children: setReadOnly(node.children, databaseId, readOnly),
+      };
+    }
+    if (node.kind === "database" && node.id === databaseId) {
+      return { ...node, readOnly };
     }
     return node;
   });
@@ -741,6 +769,9 @@ export function WorkspaceProvider({
   const [jsBuffers, setJsBuffers] = useState<Map<string, string>>(
     () => new Map(),
   );
+  const [tableFilters, setTableFilters] = useState<Map<string, string>>(
+    () => new Map(),
+  );
   const [activeJsScriptByDb, setActiveJsScriptByDb] = useState<
     Map<string, string>
   >(() => new Map());
@@ -809,6 +840,11 @@ export function WorkspaceProvider({
         next.delete(key);
         return next;
       }),
+    [],
+  );
+  const setTableFilter = useCallback(
+    (tableId: string, filter: string) =>
+      setTableFilters((current) => new Map(current).set(tableId, filter)),
     [],
   );
   const setActiveScript = useCallback(
@@ -1024,6 +1060,8 @@ export function WorkspaceProvider({
       cancelRename: () => setRenamingNodeId(null),
       setDatabaseAccent: (id, color) =>
         setTree((current) => setAccentColor(current, id, color)),
+      setDatabaseReadOnly: (id, readOnly) =>
+        setTree((current) => setReadOnly(current, id, readOnly)),
       saveScript: (databaseId, name, sql) => {
         const trimmed = name.trim();
         const node = nodesById.get(databaseId);
@@ -1064,6 +1102,8 @@ export function WorkspaceProvider({
       sqlBuffers,
       setSqlBuffer,
       clearSqlBuffer,
+      tableFilters,
+      setTableFilter,
       saveJsScript: (databaseId, name, code) => {
         const trimmed = name.trim();
         const node = nodesById.get(databaseId);
@@ -1211,6 +1251,8 @@ export function WorkspaceProvider({
     sqlBuffers,
     setSqlBuffer,
     clearSqlBuffer,
+    tableFilters,
+    setTableFilter,
     activeJsScriptByDb,
     setActiveJsScript,
     jsBuffers,

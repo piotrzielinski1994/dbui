@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { isWriteSql } from "@/lib/script/dispatch";
+import { isWriteSql, isWriteMongo, MONGO_WRITE_OPS } from "@/lib/script/dispatch";
 
 // The write keywords the read-only guard rejects when they lead the statement (AC-006 / TC-003).
 const WRITE_KEYWORDS = [
@@ -87,5 +87,47 @@ describe("isWriteSql comment + whitespace stripping", () => {
   // AC-006 - behavior (a leading comment followed only by a SELECT is still a read)
   it("should treat a leading comment before a SELECT as read", () => {
     expect(isWriteSql("-- daily report\nSELECT count(*) FROM t")).toBe(false);
+  });
+});
+
+describe("isWriteMongo write ops", () => {
+  // behavior (every write op after db.<coll>. is write-shaped, blocked on a read-only connection)
+  for (const op of MONGO_WRITE_OPS) {
+    it(`should treat db.users.${op}(...) as write-shaped`, () => {
+      expect(isWriteMongo(`db.users.${op}({}, {})`)).toBe(true);
+    });
+  }
+
+  // behavior (a quoted collection with dashes still resolves the write op)
+  it("should treat a write on a quoted dashed collection as write-shaped", () => {
+    expect(isWriteMongo('db."order-items".updateOne({}, {})')).toBe(true);
+  });
+
+  // behavior (a leading line comment before the command is stripped)
+  it("should detect a write op after a leading comment", () => {
+    expect(isWriteMongo("// note\ndb.t.deleteMany({})")).toBe(false); // JS `//` is not a SQL comment - stays read
+    expect(isWriteMongo("-- note\ndb.t.deleteMany({})")).toBe(true);
+  });
+});
+
+describe("isWriteMongo reads", () => {
+  // behavior (find/aggregate are the only reads - never blocked)
+  it("should treat db.<coll>.find(...) as read", () => {
+    expect(isWriteMongo("db.users.find({})")).toBe(false);
+  });
+
+  it("should treat db.<coll>.aggregate(...) as read", () => {
+    expect(isWriteMongo("db.users.aggregate([])")).toBe(false);
+  });
+
+  // behavior (a bare filter document - the filter row, no db.<coll> prefix - is not a command write)
+  it("should treat a bare filter document as read", () => {
+    expect(isWriteMongo('{ "age": { "$gt": 30 } }')).toBe(false);
+  });
+
+  // behavior (empty / whitespace is not write-shaped)
+  it("should treat empty input as read", () => {
+    expect(isWriteMongo("")).toBe(false);
+    expect(isWriteMongo("   \n ")).toBe(false);
   });
 });

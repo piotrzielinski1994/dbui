@@ -220,6 +220,49 @@ function AccentField({
   );
 }
 
+// Per-database Read-only toggle: an accessible square switch (role="switch") that blocks every
+// write path to this database (table mutations + write-shaped SQL) when on. A prod safety cue,
+// paired with the accent color. Square, theme-token colored - obeys design.md (no rounded corners).
+function ReadOnlyField({
+  nodeId,
+  readOnly,
+}: {
+  nodeId: string;
+  readOnly: boolean;
+}) {
+  const { setDatabaseReadOnly } = useWorkspace();
+  return (
+    <Field label="Read-only" htmlFor="conn-readonly">
+      <div className="flex items-center gap-2">
+        <button
+          id="conn-readonly"
+          type="button"
+          role="switch"
+          aria-checked={readOnly}
+          onClick={() => setDatabaseReadOnly(nodeId, !readOnly)}
+          className={cn(
+            "relative flex h-5 w-9 shrink-0 items-center border border-border transition-colors",
+            readOnly ? "bg-primary" : "bg-muted",
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "block size-4 transition-transform",
+              readOnly
+                ? "translate-x-4 bg-primary-foreground"
+                : "translate-x-0.5 bg-foreground",
+            )}
+          />
+        </button>
+        <span className="text-xs text-muted-foreground">
+          Block all writes to this database
+        </span>
+      </div>
+    </Field>
+  );
+}
+
 function PasswordField({
   value,
   onChange,
@@ -298,6 +341,7 @@ function ConnectionForm({ node }: { node: DatabaseNode }) {
         />
       </Field>
       <AccentField nodeId={nodeId} accentColor={node.accentColor} />
+      <ReadOnlyField nodeId={nodeId} readOnly={node.readOnly} />
       <Field label="Type" htmlFor="conn-engine">
         <Select
           value={form.engine}

@@ -44,6 +44,7 @@ const tree: TreeNode[] = [
   {
     kind: "database",
     accentColor: null,
+    readOnly: false,
     id: "db-app",
     name: "app",
     engine: "postgres",

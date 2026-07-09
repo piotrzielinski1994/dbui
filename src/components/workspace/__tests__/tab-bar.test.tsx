@@ -30,6 +30,38 @@ describe("Tab click target", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
+  // CSS-contract: the tablist must own a horizontal scroller so overflowing tabs scroll inside the
+  // bar instead of stretching it and dragging the whole content pane into a horizontal scroll.
+  // jsdom can't measure layout, so we assert the classes that deliver the scroll.
+  it("should let the tab strip scroll horizontally if its tabs overflow, not the whole content", () => {
+    render(
+      <TabBar ariaLabel="demo tabs">
+        <Tab isActive={false} onSelect={() => {}} ariaLabel="alpha">
+          alpha
+        </Tab>
+      </TabBar>,
+    );
+
+    const tablist = screen.getByRole("tablist", { name: "demo tabs" });
+    expect(tablist.className).toContain("overflow-x-auto");
+    expect(tablist.className).toContain("overflow-y-hidden");
+    expect(tablist.className).toContain("min-w-0");
+  });
+
+  it("should keep each tab at its intrinsic width (shrink-0) so it scrolls instead of squishing", () => {
+    render(
+      <TabBar ariaLabel="demo tabs">
+        <Tab isActive={false} onSelect={() => {}} ariaLabel="alpha">
+          alpha
+        </Tab>
+      </TabBar>,
+    );
+
+    // walk up from the role=tab button to the tab's outer element (the shrink-0 flex row)
+    const outer = screen.getByRole("tab", { name: "alpha" }).parentElement;
+    expect(outer?.className).toContain("shrink-0");
+  });
+
   it("should not trigger onSelect when the trailing close control is clicked", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

@@ -48,3 +48,36 @@ export function isWriteSql(sql: string): boolean {
   const keyword = match[1].toUpperCase();
   return WRITE_KEYWORDS.some((write) => write === keyword);
 }
+
+// The MongoDB Query-tab operations that mutate a collection. A `db.<coll>.<op>(...)` command whose
+// op is one of these is a write - rejected on a read-only connection (F11). find/aggregate are the
+// only reads, so anything in this set is the write half of the same self-contained command grammar.
+export const MONGO_WRITE_OPS = [
+  "insertOne",
+  "insertMany",
+  "updateOne",
+  "updateMany",
+  "deleteOne",
+  "deleteMany",
+  "replaceOne",
+  "findOneAndUpdate",
+  "findOneAndReplace",
+  "findOneAndDelete",
+  "bulkWrite",
+  "remove",
+  "save",
+  "drop",
+] as const;
+
+// True when a Mongo Query-tab command is a write: matches the `.op(` after the `db.<coll>.` prefix
+// against MONGO_WRITE_OPS. Prefix/leading-command best-effort (same spirit as isWriteSql) - it reads
+// the FIRST command's op; a read-led multi-command buffer chaining a write is a documented gap.
+export function isWriteMongo(command: string): boolean {
+  const leading = stripLeading(command);
+  // Grab the method name in `db.<collection>.<method>(` - the collection may be quoted (dots/dashes).
+  const match = leading.match(/^db\.(?:"[^"]*"|'[^']*'|[^.(]+)\.([A-Za-z]+)\s*\(/);
+  if (!match) {
+    return false;
+  }
+  return MONGO_WRITE_OPS.some((op) => op === match[1]);
+}

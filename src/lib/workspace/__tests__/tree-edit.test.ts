@@ -40,6 +40,7 @@ const database = (id: string, name = id): DatabaseNode => ({
     message: "",
   },
   accentColor: null,
+  readOnly: false,
 });
 
 const folder = (id: string, children: TreeNode[], name = id): FolderNode => ({

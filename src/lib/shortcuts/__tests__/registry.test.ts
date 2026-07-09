@@ -23,6 +23,7 @@ const EXPECTED_BY_SCOPE: Record<ShortcutScope, ShortcutActionId[]> = {
     "delete-rows",
     "toggle-json-view",
     "toggle-structure-view",
+    "refresh-table",
   ],
   tree: ["delete-nodes"],
   editor: ["run-query", "save-script"],

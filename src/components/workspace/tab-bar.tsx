@@ -5,11 +5,17 @@ import { cn } from "@/lib/utils";
 // SQL/Views/Script/Settings, the console's History/Changes/Console). Centralising it kills the
 // drift that came from three hand-rolled copies.
 //
-// The bar carries the single 1px bottom border. The active tab grows 1px past the bar
-// (`-mb-px` + `h-[calc(100%+1px)]`) so its bottom edge lands ON that border, then a 1px inset
-// `--primary` line paints over it - one underline, never a underline+border stack. The bar must
-// NOT clip vertically (no `overflow-y`/`overflow-x-auto` on the bar), or the 1px overhang - and
-// thus the underline - gets cut off.
+// The tablist owns its OWN horizontal scroller (`min-w-0 overflow-x-auto overflow-y-hidden`) so
+// overflowing tabs scroll INSIDE the bar instead of stretching it and dragging the whole content
+// pane into a horizontal scroll. `min-w-0` lets the flex child shrink below its tabs' intrinsic
+// width; `overflow-y-hidden` suppresses the stray vertical scrollbar that `overflow-x-auto` would
+// otherwise force.
+//
+// The 1px underline can't use a bottom-border overhang (a vertical scroller clips it): instead the
+// baseline is a 1px inset `--border` shadow carried by the bar (covers the trailing area) AND by
+// every inactive tab (so `hover:bg-accent` never opens a gap in the divider). The active tab swaps
+// its own inset shadow to `--primary`, drawn on top - one underline, never an underline+border
+// stack, and nothing overhangs the box so the scroller clips nothing.
 
 export function TabBar({
   ariaLabel,
@@ -23,8 +29,17 @@ export function TabBar({
   className?: string;
 }) {
   return (
-    <div className={cn("flex h-9 shrink-0 items-stretch border-b bg-muted/30", className)}>
-      <div role="tablist" aria-label={ariaLabel} className="flex h-full items-stretch">
+    <div
+      className={cn(
+        "flex h-9 shrink-0 items-stretch bg-muted/30 shadow-[inset_0_-1px_0_0_var(--border)]",
+        className,
+      )}
+    >
+      <div
+        role="tablist"
+        aria-label={ariaLabel}
+        className="flex h-full min-w-0 items-stretch overflow-x-auto overflow-y-hidden"
+      >
         {children}
       </div>
       {trailing}
@@ -53,10 +68,10 @@ export const Tab = forwardRef<HTMLDivElement, TabProps>(function Tab(
       ref={ref}
       {...rest}
       className={cn(
-        "flex h-full items-center border-r hover:bg-accent",
+        "flex h-full shrink-0 items-center border-r after:hidden hover:bg-accent",
         isActive
-          ? "-mb-px h-[calc(100%+1px)] bg-accent shadow-[inset_0_-1px_0_0_var(--primary)]"
-          : "bg-transparent",
+          ? "bg-accent shadow-[inset_0_-1px_0_0_var(--primary)]"
+          : "bg-transparent shadow-[inset_0_-1px_0_0_var(--border)]",
         className,
       )}
     >

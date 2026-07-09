@@ -15,6 +15,7 @@ export type ShortcutActionId =
   | "toggle-record-view"
   | "toggle-json-view"
   | "toggle-structure-view"
+  | "refresh-table"
   | "delete-rows"
   | "delete-nodes"
   | "run-query"
@@ -128,6 +129,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     description:
       "Show the table's columns, indexes, foreign keys, and constraints.",
     defaultHotkey: "Mod+Shift+I",
+    scope: "grid",
+  },
+  {
+    id: "refresh-table",
+    name: "Refresh table",
+    description: "Re-fetch the open table's rows from the database.",
+    defaultHotkey: "Mod+R",
     scope: "grid",
   },
   {

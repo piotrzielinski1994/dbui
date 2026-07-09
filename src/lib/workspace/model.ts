@@ -147,6 +147,9 @@ type DatabaseNodeBase = {
   // Optional per-database accent color (lowercase `#rrggbb` hex) used as a border/orientation cue
   // across the sidebar row, tabs, and content frame. null = no accent (default border).
   accentColor: string | null;
+  // When true, every write path to this database is blocked at the frontend boundary (table
+  // mutations + write-shaped SQL) - a prod safety cue paired with accentColor. Default false.
+  readOnly: boolean;
   tables: TableNode[];
   views: ViewObject[];
   sql: string;

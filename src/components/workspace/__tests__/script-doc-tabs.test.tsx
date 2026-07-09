@@ -44,6 +44,7 @@ function databaseNode(overrides: Partial<DatabaseNode>): DatabaseNode {
   return {
     kind: "database",
     accentColor: null,
+    readOnly: false,
     id: "db-a",
     name: "a",
     engine: "postgres",
@@ -215,6 +216,7 @@ function mongoNode(): DatabaseNode {
     id: "db-mongo",
     name: "orders_mongo",
     accentColor: null,
+    readOnly: false,
     engine: "mongodb",
     host: "localhost",
     port: 27017,

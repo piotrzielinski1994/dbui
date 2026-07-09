@@ -24,6 +24,7 @@ import {
   selectedOrAllSql,
 } from "@/components/workspace/sql-editor";
 import { useWorkspace } from "@/components/workspace/workspace-context";
+import { isWriteSql, isWriteMongo } from "@/lib/script/dispatch";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import {
@@ -337,7 +338,7 @@ function SqlPane({
   savedScripts,
   collections,
 }: {
-  node: { id: string; sql: string };
+  node: { id: string; sql: string; readOnly: boolean };
   connectionId: string;
   isConnected: boolean;
   engine: DbEngine;
@@ -432,7 +433,28 @@ function SqlPane({
       return;
     }
     const query = selectedOrAllSql(editorRef.current);
-    run.mutate(query.trim().length > 0 ? query : sql);
+    const effective = query.trim().length > 0 ? query : sql;
+    // Read-only database: block a write-shaped statement before it reaches the backend. SQL uses the
+    // leading-keyword `isWriteSql`; MongoDB uses `isWriteMongo` (the `.op(` after `db.<coll>.` -
+    // updateOne/insertOne/... now that the Query tab runs writes too). Same block UX the Script tab
+    // ships: sticky warning toast + a History error line, statement never sent. Prefix-only
+    // (documented) - a read-led multi-statement buffer chaining a write slips by.
+    const isWrite =
+      engine === "mongodb" ? isWriteMongo(effective) : isWriteSql(effective);
+    if (node.readOnly && isWrite) {
+      toast.warning("Database is read-only - write blocked", {
+        duration: Infinity,
+      });
+      addHistoryEntry({
+        id: `readonly-${effective}-${Date.now()}`,
+        sql: effective,
+        status: "error",
+        message: "blocked (read-only)",
+        at: new Date().toLocaleTimeString(),
+      });
+      return;
+    }
+    run.mutate(effective);
   };
   const cancel = () => {
     if (requestIdRef.current) {

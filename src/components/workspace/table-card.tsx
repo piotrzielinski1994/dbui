@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Plus, Search } from "lucide-react";
+import { Plus, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -405,6 +405,7 @@ function LiveTable({
   tableName,
   schema,
   filter,
+  readOnly,
 }: {
   config: ConnectionConfig;
   connectionId: string;
@@ -412,6 +413,7 @@ function LiveTable({
   tableName: string;
   schema: string | null;
   filter: string | undefined;
+  readOnly: boolean;
 }) {
   const queryClient = useQueryClient();
   const {
@@ -620,7 +622,10 @@ function LiveTable({
   );
 
   const primaryKey = data?.pages[0]?.primaryKey ?? null;
-  const editable = primaryKey !== null;
+  // A read-only database disables every edit affordance by dropping `editable`, reusing the exact
+  // no-primary-key read-only rendering (no inline edit / Add-row / delete / clone / doc-edit / JSON
+  // auto-stage) instead of a bespoke disabled state.
+  const editable = primaryKey !== null && !readOnly;
   const pkIndex = primaryKey ? columnNames.indexOf(primaryKey) : -1;
 
   // Draft rows (staged inserts) are appended after the saved rows; their grid index is
@@ -826,6 +831,9 @@ function LiveTable({
   }
 
   const save = async () => {
+    if (readOnly) {
+      return;
+    }
     const toPayload = (edit: PendingMutation): RowMutation[] => {
       switch (edit.kind) {
         case "cell":
@@ -1143,9 +1151,11 @@ function LiveTable({
           >
             Discard
           </Button>
-          <Button size="sm" onClick={save} disabled={isSaving}>
-            {isSaving ? "Saving..." : "Save"}
-          </Button>
+          {readOnly ? null : (
+            <Button size="sm" onClick={save} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+          )}
         </div>
       ) : null}
     </div>
@@ -1170,16 +1180,18 @@ function staticRows(table: TableNode, filter: string | undefined): Cell[][] {
 }
 
 export function TableCard() {
+  const queryClient = useQueryClient();
   const {
     activeNode,
     connections,
     databaseSchemas,
     databaseIdByTableId,
+    nodesById,
     pendingEdits,
     discardPendingEditsForTable,
+    tableFilters,
+    setTableFilter,
   } = useWorkspace();
-  const [filterText, setFilterText] = useState("");
-  const [appliedFilter, setAppliedFilter] = useState("");
   const [isDiscardPromptOpen, setIsDiscardPromptOpen] = useState(false);
 
   const isTable = activeNode?.kind === "table";
@@ -1187,12 +1199,34 @@ export function TableCard() {
     ? databaseIdByTableId.get(activeNode.id)
     : undefined;
   const config = databaseId ? connections.get(databaseId) : undefined;
+  // The owning database's read-only flag: when on, the table card blocks every write path (folds
+  // into LiveTable's `editable` gate + hides its Save bar), reusing the existing no-PK read-only
+  // rendering rather than a new disabled state.
+  const dbNode = databaseId ? nodesById.get(databaseId) : undefined;
+  const readOnly = dbNode?.kind === "database" ? dbNode.readOnly : false;
   const schema =
     (databaseId ? databaseSchemas.get(databaseId) : undefined) ?? EMPTY_SCHEMA;
   const tableId = isTable ? activeNode.id : undefined;
   const hasPendingEdits = pendingEdits.some(
     (edit) => edit.tableId === tableId,
   );
+
+  // The APPLIED filter lives in the provider keyed by tableId, so it survives this card unmounting
+  // on a content-tab switch (the card is a singleton keyed on the active node). The editor DRAFT is
+  // local but re-seeds from the applied value whenever the open table changes (adjust-state-on-prop-
+  // change), so switching tables shows that table's own filter, not the previous one's leftover text.
+  const appliedFilter = (tableId && tableFilters.get(tableId)) || "";
+  const [filterText, setFilterText] = useState(appliedFilter);
+  const [filterSeedTableId, setFilterSeedTableId] = useState(tableId);
+  if (tableId !== filterSeedTableId) {
+    setFilterSeedTableId(tableId);
+    setFilterText(appliedFilter);
+  }
+  const setAppliedFilter = (next: string) => {
+    if (tableId) {
+      setTableFilter(tableId, next);
+    }
+  };
 
   const filter = appliedFilter.trim() ? appliedFilter.trim() : undefined;
   const isMongo = config?.engine === "mongodb";
@@ -1222,6 +1256,42 @@ export function TableCard() {
     setAppliedFilter(filterText);
     setIsDiscardPromptOpen(false);
   };
+  // Re-fetch the open table from the database: invalidate its rows + count queries so LiveTable's
+  // useInfiniteQuery/useQuery refetch (a new manual read appears in History, exactly like a sort or
+  // Load more). Keyed by tableId, so only the active table refreshes.
+  const refresh = () => {
+    if (!tableId) {
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["table-rows", tableId] });
+    queryClient.invalidateQueries({ queryKey: ["table-count", tableId] });
+    queryClient.invalidateQueries({ queryKey: ["table-structure", tableId] });
+  };
+
+  // Grid-scope Refresh shortcut (default Mod+R). preventDefault so it never triggers a native webview
+  // reload; guarded by isEditableTarget so typing in the filter editor / a cell never refreshes.
+  const refreshShortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
+  useEffect(() => {
+    if (!tableId) {
+      return;
+    }
+    const binding = resolveShortcuts(refreshShortcuts)["refresh-table"];
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchesHotkey(event, binding)) {
+        return;
+      }
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      queryClient.invalidateQueries({ queryKey: ["table-rows", tableId] });
+      queryClient.invalidateQueries({ queryKey: ["table-count", tableId] });
+      queryClient.invalidateQueries({ queryKey: ["table-structure", tableId] });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [tableId, refreshShortcuts, queryClient]);
 
   if (!activeNode || activeNode.kind !== "table") {
     return null;
@@ -1234,6 +1304,10 @@ export function TableCard() {
       <div className="flex h-10.25 shrink-0 items-stretch border-b bg-muted/30">
         <div className="flex min-w-0 flex-1 items-center px-3">
           <SqlEditor
+            // Keyed by tableId so the filter editor remounts per table: its CodeMirror doc is seeded
+            // fresh from THIS table's `filterText` (reseeded from the provider on a tab switch), so
+            // one table's filter never lingers in another table's editor.
+            key={tableId}
             value={filterText}
             onChange={setFilterText}
             engine={config?.engine ?? "postgres"}
@@ -1259,6 +1333,17 @@ export function TableCard() {
         >
           <Search className="size-4" />
         </Button>
+        {isLive ? (
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label="Refresh"
+            onClick={refresh}
+            className="h-full rounded-none border-0 border-l border-l-border px-3"
+          >
+            <RefreshCw className="size-4" />
+          </Button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         {isLive && config && databaseId ? (
@@ -1269,6 +1354,7 @@ export function TableCard() {
             tableName={activeNode.name}
             schema={activeNode.schema}
             filter={filter}
+            readOnly={readOnly}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

@@ -725,11 +725,20 @@ fn documents_outcome(statement: String, documents: &[Document]) -> QueryOutcome 
     }
 }
 
-// The two read operations a Query-tab command can run.
+// The operations a Query-tab command can run: two reads (find/aggregate, capped by `limit`) and the
+// write ops (insert/update/delete/replace). Writes are blocked upstream when the database is
+// read-only (F11) - the backend runs whatever it's given.
 #[derive(Debug, PartialEq)]
 enum MongoOp {
     Find,
     Aggregate,
+    InsertOne,
+    InsertMany,
+    UpdateOne,
+    UpdateMany,
+    DeleteOne,
+    DeleteMany,
+    ReplaceOne,
 }
 
 // One parsed `db.<collection>.<op>(<json>)` command. The collection travels IN the command text
@@ -739,13 +748,73 @@ enum MongoOp {
 struct MongoCommand {
     collection: String,
     op: MongoOp,
-    arg: String,
+    // The raw arguments between the outer parens, split on top-level commas (a comma inside a
+    // string or a brace/bracket group stays). Reads use the first arg (filter/pipeline); the write
+    // ops take two (`updateOne(filter, update)` etc.). Parsed to BSON later, per op.
+    args: Vec<String>,
 }
 
-// Parses one `db.<collection>.find(<filter>)` / `db.<collection>.aggregate(<pipeline>)` command.
-// The collection name is a bare identifier or a quoted string (Mongo allows dots/dashes in names);
-// the argument is whatever sits between the outer parens, parsed later as JSON. Whitespace and a
-// trailing `;` are tolerated. Anything else is a clear error (never panics).
+// The op name -> MongoOp. Unknown -> Err (listing the supported set).
+fn parse_op(method: &str) -> Result<MongoOp, String> {
+    match method {
+        "find" => Ok(MongoOp::Find),
+        "aggregate" => Ok(MongoOp::Aggregate),
+        "insertOne" => Ok(MongoOp::InsertOne),
+        "insertMany" => Ok(MongoOp::InsertMany),
+        "updateOne" => Ok(MongoOp::UpdateOne),
+        "updateMany" => Ok(MongoOp::UpdateMany),
+        "deleteOne" => Ok(MongoOp::DeleteOne),
+        "deleteMany" => Ok(MongoOp::DeleteMany),
+        "replaceOne" => Ok(MongoOp::ReplaceOne),
+        other => Err(format!(
+            "unsupported operation '{other}' - use find/aggregate/insertOne/insertMany/updateOne/updateMany/deleteOne/deleteMany/replaceOne"
+        )),
+    }
+}
+
+// Splits the raw text between the outer parens into top-level arguments on commas, leaving a comma
+// inside a string literal or a bracket/brace/paren group untouched (mirrors split_commands). An
+// all-whitespace body yields an empty vec (a bare `find()` = match-all).
+fn split_args(body: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut depth: i32 = 0;
+    let mut in_string: Option<char> = None;
+    let mut previous = '\0';
+    for character in body.chars() {
+        match in_string {
+            Some(quote) => {
+                if character == quote && previous != '\\' {
+                    in_string = None;
+                }
+            }
+            None => match character {
+                '"' | '\'' => in_string = Some(character),
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    args.push(current.trim().to_string());
+                    current.clear();
+                    previous = character;
+                    continue;
+                }
+                _ => {}
+            },
+        }
+        current.push(character);
+        previous = character;
+    }
+    let last = current.trim().to_string();
+    if !last.is_empty() || !args.is_empty() {
+        args.push(last);
+    }
+    args
+}
+
+// Parses one `db.<collection>.<op>(<args>)` command. The collection name is a bare identifier or a
+// quoted string (Mongo allows dots/dashes in names); the args between the outer parens are split on
+// top-level commas and parsed to BSON per op. Whitespace and a trailing `;` are tolerated. Anything
+// else is a clear error (never panics).
 fn parse_command(text: &str) -> Result<MongoCommand, String> {
     let trimmed = text.trim().trim_end_matches(';').trim();
     let rest = trimmed
@@ -753,7 +822,7 @@ fn parse_command(text: &str) -> Result<MongoCommand, String> {
         .ok_or_else(|| "command must start with db.<collection>".to_string())?;
     let dot = rest
         .find('.')
-        .ok_or_else(|| "expected db.<collection>.find(...) or .aggregate(...)".to_string())?;
+        .ok_or_else(|| "expected db.<collection>.<op>(...)".to_string())?;
     let collection_token = &rest[..dot];
     let collection = collection_token
         .strip_prefix('"')
@@ -772,27 +841,57 @@ fn parse_command(text: &str) -> Result<MongoCommand, String> {
     let after = &rest[dot + 1..];
     let open = after
         .find('(')
-        .ok_or_else(|| "expected find( or aggregate(".to_string())?;
-    let method = after[..open].trim();
-    let op = match method {
-        "find" => MongoOp::Find,
-        "aggregate" => MongoOp::Aggregate,
-        other => return Err(format!("unsupported operation '{other}' - use find or aggregate")),
-    };
+        .ok_or_else(|| "expected <op>(".to_string())?;
+    let op = parse_op(after[..open].trim())?;
     let arg_with_close = &after[open + 1..];
     let close = arg_with_close
         .rfind(')')
         .ok_or_else(|| "missing closing )".to_string())?;
-    let arg = arg_with_close[..close].trim().to_string();
+    let args = split_args(arg_with_close[..close].trim());
     Ok(MongoCommand {
         collection,
         op,
-        arg,
+        args,
     })
 }
 
-// Runs one self-contained Query-tab command (`db.coll.find({...})` / `db.coll.aggregate([...])`),
-// capped at `limit`. find's empty arg defaults to match-all; aggregate gets a trailing `$limit`.
+// The nth arg's raw text (empty string when absent), for the read ops that tolerate a missing arg.
+fn arg_or_empty(command: &MongoCommand, index: usize) -> &str {
+    command
+        .args
+        .get(index)
+        .map(String::as_str)
+        .unwrap_or("")
+}
+
+// The nth arg parsed as a required JSON object (update/replacement/insert document). A missing,
+// blank, non-object, or malformed arg is a clear error. Extended JSON wrappers are validated.
+fn arg_document(command: &MongoCommand, index: usize, what: &str) -> Result<Document, String> {
+    let raw = arg_or_empty(command, index).trim();
+    if raw.is_empty() {
+        return Err(format!("{what} is required"));
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|error| error.to_string())?;
+    validate_extended_json(&value)?;
+    json_object_to_document(value)
+}
+
+// A write op's outcome: no rows, just the affected count (mirrors the SQL non_row_outcome shape).
+fn write_outcome(statement: String, affected: u64, verb: &str) -> QueryOutcome {
+    QueryOutcome {
+        statement,
+        columns: Vec::new(),
+        rows: Vec::new(),
+        rows_affected: affected,
+        returns_rows: false,
+        message: format!("{affected} {verb}"),
+    }
+}
+
+// Runs one self-contained Query-tab command. Reads (`find`/`aggregate`) are capped at `limit` and
+// return rows; writes (`insertOne`/`insertMany`/`updateOne`/`updateMany`/`deleteOne`/`deleteMany`/
+// `replaceOne`) run the driver op and return the affected count. Writes are gated upstream when the
+// database is read-only (F11) - this runs whatever it's handed.
 async fn run_command(
     held: &MongoConn,
     command: &MongoCommand,
@@ -802,9 +901,10 @@ async fn run_command(
         .client
         .database(&held.database)
         .collection::<Document>(&command.collection);
+    let name = &command.collection;
     match command.op {
         MongoOp::Find => {
-            let query = parse_filter(&command.arg)?;
+            let query = parse_filter(arg_or_empty(command, 0))?;
             let documents: Vec<Document> = coll
                 .find(query)
                 .limit(limit as i64)
@@ -813,13 +913,10 @@ async fn run_command(
                 .try_collect()
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok(documents_outcome(
-                format!("db.{}.find(...)", command.collection),
-                &documents,
-            ))
+            Ok(documents_outcome(format!("db.{name}.find(...)"), &documents))
         }
         MongoOp::Aggregate => {
-            let mut stages = parse_pipeline(&command.arg)?;
+            let mut stages = parse_pipeline(arg_or_empty(command, 0))?;
             stages.push(doc! { "$limit": limit as i64 });
             let documents: Vec<Document> = coll
                 .aggregate(stages)
@@ -829,11 +926,115 @@ async fn run_command(
                 .await
                 .map_err(|error| error.to_string())?;
             Ok(documents_outcome(
-                format!("db.{}.aggregate(...)", command.collection),
+                format!("db.{name}.aggregate(...)"),
                 &documents,
             ))
         }
+        MongoOp::InsertOne => {
+            let document = arg_document(command, 0, "insertOne document")?;
+            coll.insert_one(document)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(format!("db.{name}.insertOne(...)"), 1, "inserted"))
+        }
+        MongoOp::InsertMany => {
+            let documents = parse_document_array(arg_or_empty(command, 0))?;
+            if documents.is_empty() {
+                return Err("insertMany requires a non-empty array of documents".to_string());
+            }
+            let result = coll
+                .insert_many(documents)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.insertMany(...)"),
+                result.inserted_ids.len() as u64,
+                "inserted",
+            ))
+        }
+        MongoOp::UpdateOne => {
+            let filter = parse_filter(arg_or_empty(command, 0))?;
+            let update = arg_document(command, 1, "updateOne update document")?;
+            let result = coll
+                .update_one(filter, update)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.updateOne(...)"),
+                result.modified_count,
+                "modified",
+            ))
+        }
+        MongoOp::UpdateMany => {
+            let filter = parse_filter(arg_or_empty(command, 0))?;
+            let update = arg_document(command, 1, "updateMany update document")?;
+            let result = coll
+                .update_many(filter, update)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.updateMany(...)"),
+                result.modified_count,
+                "modified",
+            ))
+        }
+        MongoOp::DeleteOne => {
+            let filter = parse_filter(arg_or_empty(command, 0))?;
+            let result = coll
+                .delete_one(filter)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.deleteOne(...)"),
+                result.deleted_count,
+                "deleted",
+            ))
+        }
+        MongoOp::DeleteMany => {
+            let filter = parse_filter(arg_or_empty(command, 0))?;
+            let result = coll
+                .delete_many(filter)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.deleteMany(...)"),
+                result.deleted_count,
+                "deleted",
+            ))
+        }
+        MongoOp::ReplaceOne => {
+            let filter = parse_filter(arg_or_empty(command, 0))?;
+            let replacement = arg_document(command, 1, "replaceOne replacement document")?;
+            let result = coll
+                .replace_one(filter, replacement)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(write_outcome(
+                format!("db.{name}.replaceOne(...)"),
+                result.modified_count,
+                "modified",
+            ))
+        }
     }
+}
+
+// Parses a JSON array of objects (insertMany's argument) into BSON documents. A non-array or a
+// non-object element is a clear error. Extended JSON wrappers are validated.
+fn parse_document_array(text: &str) -> Result<Vec<Document>, String> {
+    let value: Value = serde_json::from_str(text.trim()).map_err(|error| error.to_string())?;
+    validate_extended_json(&value)?;
+    let Value::Array(items) = value else {
+        return Err("insertMany requires a JSON array of documents".to_string());
+    };
+    items
+        .into_iter()
+        .map(|item| {
+            if !item.is_object() {
+                return Err("each insertMany element must be a JSON object".to_string());
+            }
+            json_object_to_document(item)
+        })
+        .collect()
 }
 
 // Command-facing Query-tab runner: splits the buffer into `;`-separated commands, runs each in
@@ -931,7 +1132,7 @@ mod tests {
         let command = parse_command("db.users.find({ \"age\": { \"$gt\": 30 } })").expect("parse");
         assert_eq!(command.collection, "users");
         assert_eq!(command.op, MongoOp::Find);
-        assert_eq!(command.arg, "{ \"age\": { \"$gt\": 30 } }");
+        assert_eq!(command.args, vec!["{ \"age\": { \"$gt\": 30 } }".to_string()]);
     }
 
     // behavior (aggregate command + a quoted collection name + a trailing semicolon)
@@ -941,7 +1142,7 @@ mod tests {
             parse_command("db.\"order-items\".aggregate([{ \"$match\": {} }]);").expect("parse");
         assert_eq!(command.collection, "order-items");
         assert_eq!(command.op, MongoOp::Aggregate);
-        assert_eq!(command.arg, "[{ \"$match\": {} }]");
+        assert_eq!(command.args, vec!["[{ \"$match\": {} }]".to_string()]);
     }
 
     // behavior (an empty find arg is allowed - it means match-all)
@@ -949,7 +1150,34 @@ mod tests {
     fn should_parse_an_empty_find_arg() {
         let command = parse_command("db.events.find()").expect("parse");
         assert_eq!(command.collection, "events");
-        assert_eq!(command.arg, "");
+        assert!(command.args.is_empty());
+    }
+
+    // behavior (a write op parses its collection + op + both args split on the top-level comma)
+    #[test]
+    fn should_parse_an_update_one_with_filter_and_update() {
+        let command = parse_command(
+            "db.users.updateOne({ \"_id\": { \"$oid\": \"507f1f77bcf86cd799439011\" } }, { \"$set\": { \"age\": 99 } })",
+        )
+        .expect("parse");
+        assert_eq!(command.collection, "users");
+        assert_eq!(command.op, MongoOp::UpdateOne);
+        assert_eq!(command.args.len(), 2);
+        assert_eq!(
+            command.args[0],
+            "{ \"_id\": { \"$oid\": \"507f1f77bcf86cd799439011\" } }"
+        );
+        assert_eq!(command.args[1], "{ \"$set\": { \"age\": 99 } }");
+    }
+
+    // behavior (a comma inside a nested object/string does NOT split the args)
+    #[test]
+    fn should_not_split_args_on_a_nested_comma() {
+        let command =
+            parse_command("db.t.updateOne({ \"a\": 1, \"b\": 2 }, { \"$set\": { \"c\": 3 } })")
+                .expect("parse");
+        assert_eq!(command.args.len(), 2);
+        assert_eq!(command.args[0], "{ \"a\": 1, \"b\": 2 }");
     }
 
     // behavior (malformed commands are clear errors, never panics)
@@ -1320,6 +1548,91 @@ mod tests {
             .find(|index| index.name == "_id_")
             .expect("_id_ index");
         assert!(id_index.is_primary);
+
+        super::disconnect(id).await;
+    }
+
+    // Live smoke of the Query-tab WRITE ops against the test-stack mongo: insert -> update -> read
+    // back -> delete, all through the SQL-shaped run_query, into a scratch collection so seeded data
+    // is untouched. Run: cargo test --manifest-path src-tauri/Cargo.toml live_mongo_write -- --ignored
+    #[tokio::test]
+    #[ignore]
+    async fn live_mongo_write_round_trips_through_the_query_tab() {
+        use super::MongoConfig;
+
+        let config = MongoConfig {
+            host: "localhost".to_string(),
+            port: 27018,
+            database: String::new(),
+            user: "dbui".to_string(),
+            password: "dbui".to_string(),
+            uri: Some(
+                "mongodb://dbui:dbui@localhost:27018/dbui_test?authSource=admin".to_string(),
+            ),
+        };
+        let id = "live-write-test".to_string();
+        super::connect(id.clone(), config).await.expect("connect");
+
+        // Clean any leftover from a previous run.
+        let _ = super::run_query(
+            id.clone(),
+            "db.dbui_scratch.deleteMany({})".to_string(),
+            200,
+            "w0".to_string(),
+        )
+        .await;
+
+        // insertOne -> 1 inserted.
+        let inserted = super::run_query(
+            id.clone(),
+            "db.dbui_scratch.insertOne({ \"_id\": \"w1\", \"age\": 1 })".to_string(),
+            200,
+            "w1".to_string(),
+        )
+        .await
+        .expect("insert");
+        assert_eq!(inserted[0].rows_affected, 1);
+        assert!(!inserted[0].returns_rows);
+
+        // updateOne -> 1 modified.
+        let updated = super::run_query(
+            id.clone(),
+            "db.dbui_scratch.updateOne({ \"_id\": \"w1\" }, { \"$set\": { \"age\": 99 } })"
+                .to_string(),
+            200,
+            "w2".to_string(),
+        )
+        .await
+        .expect("update");
+        assert_eq!(updated[0].rows_affected, 1, "one doc modified");
+
+        // read back -> age is now 99.
+        let read = super::run_query(
+            id.clone(),
+            "db.dbui_scratch.find({ \"_id\": \"w1\" })".to_string(),
+            200,
+            "w3".to_string(),
+        )
+        .await
+        .expect("find");
+        assert_eq!(read[0].rows.len(), 1);
+        let age_col = read[0]
+            .columns
+            .iter()
+            .position(|c| c == "age")
+            .expect("age column");
+        assert_eq!(read[0].rows[0][age_col].as_deref(), Some("99"));
+
+        // deleteOne -> 1 deleted, collection empty again.
+        let deleted = super::run_query(
+            id.clone(),
+            "db.dbui_scratch.deleteOne({ \"_id\": \"w1\" })".to_string(),
+            200,
+            "w4".to_string(),
+        )
+        .await
+        .expect("delete");
+        assert_eq!(deleted[0].rows_affected, 1);
 
         super::disconnect(id).await;
     }

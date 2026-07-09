@@ -144,6 +144,7 @@ function mongoNode(): DatabaseNode {
     id: "db-mongo",
     name: "orders_mongo",
     accentColor: null,
+    readOnly: false,
     engine: "mongodb",
     host: "localhost",
     port: 27017,

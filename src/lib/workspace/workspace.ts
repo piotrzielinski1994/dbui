@@ -18,6 +18,7 @@ export type PersistedNetworkDatabase = {
   user: string;
   password: string;
   accentColor?: string;
+  readOnly?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -29,6 +30,7 @@ export type PersistedSqliteDatabase = {
   engine: "sqlite";
   file: string;
   accentColor?: string;
+  readOnly?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -45,6 +47,7 @@ export type PersistedMongoDatabase = {
   password: string;
   uri?: string;
   accentColor?: string;
+  readOnly?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -105,6 +108,13 @@ function mergeAccentColor(value: unknown): { accentColor: string } | undefined {
   return { accentColor: value.toLowerCase() };
 }
 
+// A persisted readOnly is kept only when it is the boolean `true`; a `false`, non-boolean, or
+// missing value is dropped so the database loads writable (mirrors mergeAccentColor omitting the
+// default). Guards a hand-edited/garbage workspace.json from crashing hydrate.
+function mergeReadOnly(value: unknown): { readOnly: true } | undefined {
+  return value === true ? { readOnly: true } : undefined;
+}
+
 // Keeps only the saved-script entries that are records with string `name` + `sql`; anything else
 // (missing field, non-record, non-array payload) is dropped. Returns the field only when the cleaned
 // list is non-empty, so an empty list is omitted from the persisted shape (mirrors mergeAccentColor).
@@ -146,6 +156,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
     return null;
   }
   const accent = mergeAccentColor(value.accentColor);
+  const readOnly = mergeReadOnly(value.readOnly);
   const scripts = mergeSavedScripts(value.savedScripts);
   const jsScripts = mergeSavedJsScripts(value.savedJsScripts);
   if (engine === "sqlite") {
@@ -157,6 +168,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
           engine: "sqlite",
           file: value.file,
           ...accent,
+          ...readOnly,
           ...scripts,
           ...jsScripts,
         }
@@ -186,6 +198,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
       password,
       ...uri,
       ...accent,
+      ...readOnly,
       ...scripts,
       ...jsScripts,
     };
@@ -212,6 +225,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
     user,
     password,
     ...accent,
+    ...readOnly,
     ...scripts,
     ...jsScripts,
   };
@@ -274,6 +288,7 @@ function hydrateNode(node: PersistedNode): TreeNode {
     id: node.id,
     name: node.name,
     accentColor: node.accentColor ?? null,
+    readOnly: node.readOnly ?? false,
     tables: [],
     views: [],
     sql: "",
@@ -327,6 +342,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
   }
   const accent =
     node.accentColor === null ? undefined : { accentColor: node.accentColor };
+  const readOnly = node.readOnly ? { readOnly: true as const } : undefined;
   const scripts =
     node.savedScripts.length > 0
       ? { savedScripts: node.savedScripts }
@@ -344,6 +360,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
         engine: "sqlite",
         file: node.file,
         ...accent,
+        ...readOnly,
         ...scripts,
         ...jsScripts,
       },
@@ -363,6 +380,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
         password: node.password,
         ...(node.uri !== undefined ? { uri: node.uri } : {}),
         ...accent,
+        ...readOnly,
         ...scripts,
         ...jsScripts,
       },
@@ -380,6 +398,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
       user: node.user,
       password: node.password,
       ...accent,
+      ...readOnly,
       ...scripts,
       ...jsScripts,
     },

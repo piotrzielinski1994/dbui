@@ -44,6 +44,7 @@ const database = (id: string, name = id): DatabaseNode => ({
     message: "",
   },
   accentColor: null,
+  readOnly: false,
 });
 
 const table = (id: string, name = id): TableNode => ({

@@ -37,6 +37,7 @@ const database = (id: string): DatabaseNode => ({
     message: "",
   },
   accentColor: null,
+  readOnly: false,
 });
 
 const folder = (id: string, children: TreeNode[]): FolderNode => ({

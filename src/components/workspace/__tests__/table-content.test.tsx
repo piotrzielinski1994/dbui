@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EditorView } from "@codemirror/view";
 
-import { WorkspaceProvider } from "@/components/workspace/workspace-context";
+import {
+  WorkspaceProvider,
+  useWorkspace,
+} from "@/components/workspace/workspace-context";
 import { TableCard } from "@/components/workspace/table-card";
 import { Console } from "@/components/workspace/console";
 import { toast } from "sonner";
@@ -50,6 +53,7 @@ const connectedTree: TreeNode[] = [
     id: "db-ppp",
     name: "ppp",
     accentColor: null,
+    readOnly: false,
     engine: "postgres",
     host: "localhost",
     port: 5432,
@@ -307,6 +311,28 @@ describe("TableCard live content", () => {
         expect.objectContaining({ filter: "price > 10" }),
       );
     });
+  });
+
+  // behavior (the Refresh button re-fetches the open table from the database)
+  it("should re-fetch the table when the Refresh button is clicked", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderLive();
+
+    await screen.findByText("1");
+    const callsBefore = mockFetch.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+    // the refetch addresses the same table (not a different one)
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      "db-ppp",
+      "product",
+      expect.any(Object),
+    );
   });
 
   // behavior (opening a table logs its SELECT to the History tab - it hit the DB)
@@ -1095,6 +1121,153 @@ describe("TableCard filter statement guard", () => {
   });
 });
 
+describe("TableCard filter persistence across tab switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCount.mockResolvedValue(0);
+  });
+
+  // Two tables under one connection, both open as tabs; the card is a singleton keyed on the active
+  // node, so switching tabs unmounts/rerenders it.
+  const twoTableTree: TreeNode[] = [
+    {
+      kind: "database",
+      id: "db-ppp",
+      name: "ppp",
+      accentColor: null,
+      readOnly: false,
+      engine: "postgres",
+      host: "localhost",
+      port: 5432,
+      database: "ppp",
+      user: "postgres",
+      password: "postgres",
+      tables: [
+        {
+          kind: "table",
+          id: "db-ppp::product",
+          name: "product",
+          schema: null,
+          columns: [],
+          rows: [],
+        },
+        {
+          kind: "table",
+          id: "db-ppp::orders",
+          name: "orders",
+          schema: null,
+          columns: [],
+          rows: [],
+        },
+      ],
+      views: [],
+      sql: "",
+      savedScripts: [],
+      savedJsScripts: [],
+      result: {
+        status: "success",
+        timeMs: 0,
+        rowCount: 0,
+        columns: [],
+        rows: [],
+        message: "",
+      },
+    },
+  ];
+
+  function TabSwitcher() {
+    const { setActiveTab } = useWorkspace();
+    return (
+      <div>
+        <button type="button" onClick={() => setActiveTab("db-ppp::orders")}>
+          go orders
+        </button>
+        <button type="button" onClick={() => setActiveTab("db-ppp::product")}>
+          go product
+        </button>
+      </div>
+    );
+  }
+
+  function renderTwoTables() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceProvider
+          tree={twoTableTree}
+          initialActiveTabId="db-ppp::product"
+          initialOpenTabIds={["db-ppp::product", "db-ppp::orders"]}
+          initialConnections={[["db-ppp", config]]}
+        >
+          <TabSwitcher />
+          <TableCard />
+        </WorkspaceProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  // behavior (the applied filter survives leaving the table's tab and coming back - it lives in the
+  // provider keyed by tableId, not in the card's local state which resets on unmount)
+  it("should keep the applied filter when the table tab is left and reopened", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderTwoTables();
+
+    await screen.findByText("1");
+    typeFilter("price > 10");
+    await user.click(screen.getByRole("button", { name: /run filter/i }));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        "db-ppp",
+        "product",
+        expect.objectContaining({ filter: "price > 10" }),
+      );
+    });
+
+    // leave to orders, then come back to product
+    await user.click(screen.getByRole("button", { name: "go orders" }));
+    await user.click(screen.getByRole("button", { name: "go product" }));
+
+    // the filter editor still shows product's applied expression (persisted in the provider, not
+    // lost when the card unmounted on the tab switch)
+    const filterEl = screen.getByRole("textbox", { name: /filter/i });
+    expect(filterEl).toHaveTextContent("price > 10");
+    // and the product rows were fetched with that filter at some point (not a bare re-fetch)
+    expect(mockFetch).toHaveBeenCalledWith(
+      "db-ppp",
+      "product",
+      expect.objectContaining({ filter: "price > 10" }),
+    );
+  });
+
+  // behavior (each table keeps its OWN filter - switching does not bleed one table's filter onto the
+  // other)
+  it("should not carry one table's filter onto another table", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult(["id"], [["1"]]));
+    renderTwoTables();
+
+    await screen.findByText("1");
+    typeFilter("price > 10");
+    await user.click(screen.getByRole("button", { name: /run filter/i }));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        "db-ppp",
+        "product",
+        expect.objectContaining({ filter: "price > 10" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "go orders" }));
+
+    // the orders filter editor is empty (product's filter did not leak)
+    const filterEl = screen.getByRole("textbox", { name: /filter/i });
+    expect(filterEl).not.toHaveTextContent("price > 10");
+  });
+});
+
 describe("TableCard schema-qualified addressing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1108,6 +1281,7 @@ describe("TableCard schema-qualified addressing", () => {
       id: "db-ppp",
       name: "ppp",
       accentColor: null,
+      readOnly: false,
       engine: "postgres",
       host: "localhost",
       port: 5432,

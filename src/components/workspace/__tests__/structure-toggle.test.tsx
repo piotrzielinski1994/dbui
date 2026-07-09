@@ -51,6 +51,7 @@ const tree: TreeNode[] = [
     id: "db-ppp",
     name: "ppp",
     accentColor: null,
+    readOnly: false,
     engine: "postgres",
     host: "localhost",
     port: 5432,

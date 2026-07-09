@@ -73,6 +73,7 @@ function databaseNode(overrides: Partial<DatabaseNode>): DatabaseNode {
   return {
     kind: "database",
     accentColor: null,
+    readOnly: false,
     id: "db-a",
     name: "a",
     engine: "postgres",
