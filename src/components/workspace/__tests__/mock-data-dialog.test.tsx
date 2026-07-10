@@ -149,6 +149,20 @@ function insertButton(): HTMLElement {
   return within(mockDialog()).getByRole("button", { name: /^insert/i });
 }
 
+// The dialog holds two <table>s: the column-config table (its header includes "strategy") and, once
+// Preview is clicked, the shared read-only DataGrid preview. Pick the one that is NOT the config
+// table.
+function previewGrid(dialog: HTMLElement): HTMLElement {
+  const tables = within(dialog).getAllByRole("table");
+  const grid = tables.find(
+    (table) => !table.textContent?.toLowerCase().includes("strategy"),
+  );
+  if (!grid) {
+    throw new Error("preview grid not found");
+  }
+  return grid;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockCount.mockResolvedValue(0);
@@ -174,6 +188,59 @@ describe("Mock data dialog (AC-002)", () => {
     const dialog = await screen.findByRole("dialog", { name: /mock data/i });
     const selectors = within(dialog).getAllByRole("combobox");
     expect(selectors.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("Mock data dialog preview (AC-005)", () => {
+  // AC-005, TC-004 - behavior: Preview renders the generated sample rows in a grid inside the dialog.
+  it("should render a preview grid of generated rows when Preview is clicked", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult("id"));
+    renderLive({});
+
+    const dialog = await screen.findByRole("dialog", { name: /mock data/i });
+
+    const countInput = within(dialog).getByLabelText(/rows/i);
+    await user.clear(countInput);
+    await user.type(countInput, "5");
+    await user.click(within(dialog).getByRole("button", { name: /^preview/i }));
+
+    // A preview grid appears (the shared DataGrid) in addition to the always-present config table.
+    // The config table has 3 columns + 1 header row; the preview grid has one row per generated row
+    // (a sequence PK id is deterministic: 1..5 for start=1).
+    await waitFor(() => {
+      expect(within(dialog).getAllByRole("table")).toHaveLength(2);
+    });
+    const grid = previewGrid(dialog);
+    const bodyRows = within(grid).getAllByRole("row").slice(1);
+    expect(bodyRows).toHaveLength(5);
+    // The sequence PK id is deterministic (start=1): the body cells hold 1..5 in order.
+    const idCells = bodyRows.map(
+      (row) => within(row).getAllByRole("cell")[0]?.textContent,
+    );
+    expect(idCells).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  // AC-005 - behavior: Regenerate re-rolls the seed and re-previews (still deterministic per seed,
+  // so the grid still shows a full sample - not a crash / empty state).
+  it("should re-preview a fresh sample when Regenerate is clicked", async () => {
+    const user = userEvent.setup();
+    mockFetch.mockResolvedValue(rowsResult("id"));
+    renderLive({});
+
+    const dialog = await screen.findByRole("dialog", { name: /mock data/i });
+    const countInput = within(dialog).getByLabelText(/rows/i);
+    await user.clear(countInput);
+    await user.type(countInput, "3");
+
+    await user.click(within(dialog).getByRole("button", { name: /regenerate/i }));
+
+    await waitFor(() => {
+      expect(within(dialog).getAllByRole("table")).toHaveLength(2);
+    });
+    expect(
+      within(previewGrid(dialog)).getAllByRole("row").slice(1),
+    ).toHaveLength(3);
   });
 });
 

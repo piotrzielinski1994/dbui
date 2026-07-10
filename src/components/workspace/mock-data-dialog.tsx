@@ -123,8 +123,8 @@ export function MockDataDialog({
 
   const build = () => generateRows(configs, count, seed);
 
-  const onPreview = () => {
-    const result = build();
+  const runPreview = (withSeed: number) => {
+    const result = generateRows(configs, count, withSeed);
     if (!result.ok) {
       setError(result.error);
       setPreview(null);
@@ -134,6 +134,16 @@ export function MockDataDialog({
     setPreview(
       result.value.map((row) => columns.map((column) => row[column.name] ?? null)),
     );
+  };
+
+  const onPreview = () => runPreview(seed);
+
+  // Re-roll: bump the seed (a fresh deterministic sequence - avoids Math.random, which is banned
+  // repo-wide and would break the seeded-determinism contract) and re-preview with it.
+  const onRegenerate = () => {
+    const next = seed + 1;
+    setSeed(next);
+    runPreview(next);
   };
 
   const onInsert = () => {
@@ -193,6 +203,15 @@ export function MockDataDialog({
               className="h-7 w-24"
             />
           </label>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Regenerate"
+            onClick={onRegenerate}
+            className="h-7"
+          >
+            Regenerate
+          </Button>
         </div>
 
         <div className="max-h-64 overflow-auto border">
@@ -264,7 +283,9 @@ export function MockDataDialog({
               selectedRows={emptySelection}
               onSelectRow={noop}
               editable={false}
-              editValueAt={() => null}
+              editValueAt={(rowIndex, column) =>
+                preview[rowIndex]?.[previewColumns.indexOf(column)] ?? null
+              }
               isDirtyAt={alwaysFalse}
               onCommitEdit={noop}
               shortcuts={resolvedShortcuts}
