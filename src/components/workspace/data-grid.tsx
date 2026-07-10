@@ -355,16 +355,17 @@ function DataGridImpl({
           {grid.getRowModel().rows.map((row) => {
             const isDraft = isDraftRow?.(row.index) ?? false;
             const isDeleted = isDeletedRow?.(row.index) ?? false;
-            // Row context menu only when mutations are wired (onDeleteRow / onEditDocument) and the
-            // row is a saved one - draft rows are discarded via the Changes tab, not a delete.
+            // A draft (staged-insert) row still gets a menu, but only the copy items - it can be
+            // copied to the clipboard like any row, while Delete/Clone/Edit/FK stay saved-row-only
+            // (a draft is discarded via the Changes tab, and cloning/deleting an unsaved row is
+            // meaningless). So the menu shows whenever a copy handler is wired, or - for a saved row -
+            // any of the mutation handlers.
+            const hasCopyItems = Boolean(onCopyRows || onCopySql);
+            const hasSavedRowItems = Boolean(
+              onDeleteRow || onEditDocument || onFollowForeignKey,
+            );
             const hasRowMenu =
-              Boolean(
-                onDeleteRow ||
-                  onEditDocument ||
-                  onCopyRows ||
-                  onCopySql ||
-                  onFollowForeignKey,
-              ) && !isDraft;
+              hasCopyItems || (hasSavedRowItems && !isDraft);
             const rowElement = (
               <tr
                 aria-selected={selectedRows.has(row.index)}
@@ -498,14 +499,14 @@ function DataGridImpl({
                     </ContextMenuItem>
                   ) : (
                     <>
-                      {onEditDocument ? (
+                      {onEditDocument && !isDraft ? (
                         <ContextMenuItem
                           onSelect={() => onEditDocument(row.index)}
                         >
                           Edit document
                         </ContextMenuItem>
                       ) : null}
-                      {onCloneRow ? (
+                      {onCloneRow && !isDraft ? (
                         <ContextMenuItem
                           onSelect={() => onCloneRow(row.index)}
                         >
@@ -555,7 +556,7 @@ function DataGridImpl({
                             );
                           })()
                         : null}
-                      {onFollowForeignKey && foreignKeys
+                      {onFollowForeignKey && foreignKeys && !isDraft
                         ? (() => {
                             const navigable = navigableForeignKeys(
                               foreignKeys,
@@ -582,9 +583,9 @@ function DataGridImpl({
                             );
                           })()
                         : null}
-                      {onDeleteRows &&
-                      selectedRows.has(row.index) &&
-                      selectedRows.size > 1 ? (
+                      {isDraft ? null : onDeleteRows &&
+                        selectedRows.has(row.index) &&
+                        selectedRows.size > 1 ? (
                         <>
                           {onDeleteRow ? <ContextMenuSeparator /> : null}
                           <ContextMenuItem
