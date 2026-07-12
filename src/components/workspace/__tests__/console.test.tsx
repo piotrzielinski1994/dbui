@@ -12,6 +12,21 @@ import {
   fixtureConsoleLines,
 } from "@/components/workspace/__tests__/fixtures";
 
+// SQL is rendered through SqlText, which splits each statement into per-token <span>s, so a plain
+// getByText on the whole statement fails ("broken up by multiple elements"). Match on the element's
+// full textContent instead - the SqlText wrapper span whose combined text matches.
+function sqlText(pattern: RegExp) {
+  return (_content: string, element: Element | null): boolean => {
+    if (!element) {
+      return false;
+    }
+    // Only the innermost wrapper (a span whose direct children are the token spans) should match,
+    // not every ancestor, so getByText stays unambiguous.
+    const isLeafWrapper = element.tagName === "SPAN";
+    return isLeafWrapper && pattern.test(element.textContent ?? "");
+  };
+}
+
 // Seeds one query-history entry + one pending edit, then renders the Console.
 function SeededConsole() {
   const { addHistoryEntry, upsertPendingEdit } = useWorkspace();
@@ -131,12 +146,12 @@ describe("Console", () => {
 
     await user.click(screen.getByRole("button", { name: "seed" }));
     await user.click(screen.getByRole("tab", { name: /history/i }));
-    expect(screen.getByText(/explain analyze select from email/)).toBeInTheDocument();
+    expect(screen.getByText(sqlText(/explain analyze select from email/i))).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /clear/i }));
 
     expect(
-      screen.queryByText(/explain analyze select from email/),
+      screen.queryByText(sqlText(/explain analyze select from email/i)),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/no queries run yet/i)).toBeInTheDocument();
   });
@@ -152,12 +167,12 @@ describe("Console", () => {
 
     await user.click(screen.getByRole("button", { name: "seed" }));
     await user.click(screen.getByRole("tab", { name: /changes/i }));
-    expect(screen.getByText(/UPDATE "product" SET "duration"/)).toBeInTheDocument();
+    expect(screen.getByText(sqlText(/UPDATE "product" SET "duration"/i))).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /clear/i }));
 
     expect(
-      screen.queryByText(/UPDATE "product" SET "duration"/),
+      screen.queryByText(sqlText(/UPDATE "product" SET "duration"/i)),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/no pending changes/i)).toBeInTheDocument();
   });
@@ -191,10 +206,10 @@ describe("Console", () => {
     await user.click(screen.getByRole("tab", { name: /changes/i }));
 
     expect(
-      screen.getByText(/UPDATE "product" SET "duration"/),
+      screen.getByText(sqlText(/UPDATE "product" SET "duration"/i)),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/explain analyze select from email/),
+      screen.queryByText(sqlText(/explain analyze select from email/i)),
     ).not.toBeInTheDocument();
   });
 
@@ -225,10 +240,10 @@ describe("Console", () => {
 
     // Changes must show the UPDATE and NOT the history SELECTs
     expect(
-      screen.getByText(/UPDATE "product" SET "price"/),
+      screen.getByText(sqlText(/UPDATE "product" SET "price"/i)),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/SELECT \* FROM "product"/),
+      screen.queryByText(sqlText(/SELECT \* FROM "product"/i)),
     ).not.toBeInTheDocument();
 
     // The query-history list must not linger in the DOM under the Changes tab,

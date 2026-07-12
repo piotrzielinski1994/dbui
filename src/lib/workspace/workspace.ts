@@ -19,6 +19,7 @@ export type PersistedNetworkDatabase = {
   password: string;
   accentColor?: string;
   readOnly?: boolean;
+  manualCommit?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -31,6 +32,7 @@ export type PersistedSqliteDatabase = {
   file: string;
   accentColor?: string;
   readOnly?: boolean;
+  manualCommit?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -48,6 +50,7 @@ export type PersistedMongoDatabase = {
   uri?: string;
   accentColor?: string;
   readOnly?: boolean;
+  manualCommit?: boolean;
   savedScripts?: SavedScript[];
   savedJsScripts?: SavedJsScript[];
 };
@@ -115,6 +118,12 @@ function mergeReadOnly(value: unknown): { readOnly: true } | undefined {
   return value === true ? { readOnly: true } : undefined;
 }
 
+// A persisted manualCommit is kept only when it is the boolean `true`; anything else is dropped
+// so the database loads in auto-commit mode (mirrors mergeReadOnly). Guards garbage json.
+function mergeManualCommit(value: unknown): { manualCommit: true } | undefined {
+  return value === true ? { manualCommit: true } : undefined;
+}
+
 // Keeps only the saved-script entries that are records with string `name` + `sql`; anything else
 // (missing field, non-record, non-array payload) is dropped. Returns the field only when the cleaned
 // list is non-empty, so an empty list is omitted from the persisted shape (mirrors mergeAccentColor).
@@ -157,6 +166,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
   }
   const accent = mergeAccentColor(value.accentColor);
   const readOnly = mergeReadOnly(value.readOnly);
+  const manualCommit = mergeManualCommit(value.manualCommit);
   const scripts = mergeSavedScripts(value.savedScripts);
   const jsScripts = mergeSavedJsScripts(value.savedJsScripts);
   if (engine === "sqlite") {
@@ -169,6 +179,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
           file: value.file,
           ...accent,
           ...readOnly,
+          ...manualCommit,
           ...scripts,
           ...jsScripts,
         }
@@ -199,6 +210,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
       ...uri,
       ...accent,
       ...readOnly,
+      ...manualCommit,
       ...scripts,
       ...jsScripts,
     };
@@ -226,6 +238,7 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
     password,
     ...accent,
     ...readOnly,
+    ...manualCommit,
     ...scripts,
     ...jsScripts,
   };
@@ -289,6 +302,7 @@ function hydrateNode(node: PersistedNode): TreeNode {
     name: node.name,
     accentColor: node.accentColor ?? null,
     readOnly: node.readOnly ?? false,
+    manualCommit: node.manualCommit ?? false,
     tables: [],
     views: [],
     sql: "",
@@ -343,6 +357,9 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
   const accent =
     node.accentColor === null ? undefined : { accentColor: node.accentColor };
   const readOnly = node.readOnly ? { readOnly: true as const } : undefined;
+  const manualCommit = node.manualCommit
+    ? { manualCommit: true as const }
+    : undefined;
   const scripts =
     node.savedScripts.length > 0
       ? { savedScripts: node.savedScripts }
@@ -361,6 +378,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
         file: node.file,
         ...accent,
         ...readOnly,
+        ...manualCommit,
         ...scripts,
         ...jsScripts,
       },
@@ -381,6 +399,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
         ...(node.uri !== undefined ? { uri: node.uri } : {}),
         ...accent,
         ...readOnly,
+        ...manualCommit,
         ...scripts,
         ...jsScripts,
       },
@@ -399,6 +418,7 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
       password: node.password,
       ...accent,
       ...readOnly,
+      ...manualCommit,
       ...scripts,
       ...jsScripts,
     },

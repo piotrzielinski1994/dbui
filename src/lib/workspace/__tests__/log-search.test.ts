@@ -9,23 +9,23 @@ import { parseLogLine } from "@/lib/workspace/log-line";
 
 // A small fixture spanning the shapes/levels the filter must discriminate.
 const connectOk = parseLogLine(
-  "[2026-07-10T12:34:56Z][INFO] connect id=db1 engine=postgres tables=12 (34ms)",
+  "[2026-07-10T12:34:56Z][INFO] connect connection_id=db1 engine=postgres tables=12 (34ms)",
   3,
 );
 const connectErr = parseLogLine(
-  "[2026-07-10T12:34:56Z][ERROR] connect id=db1 engine=mysql failed (40ms): connection refused",
+  "[2026-07-10T12:34:56Z][ERROR] connect connection_id=db1 engine=mysql failed (40ms): connection refused",
   5,
 );
 const queryPgOk = parseLogLine(
-  "[2026-07-10T12:34:56Z][INFO] query kind=sql id=db2 engine=postgres statements=3 rows=150 (42ms)",
+  "[2026-07-10T12:34:56Z][INFO] query kind=sql connection_id=db2 engine=postgres statements=3 rows=150 (42ms)",
   3,
 );
 const queryMongoErr = parseLogLine(
-  "[2026-07-10T12:34:56Z][ERROR] query kind=mongo id=db3 failed (5ms): bad filter",
+  "[2026-07-10T12:34:56Z][ERROR] query kind=mongo connection_id=db3 failed (5ms): bad filter",
   5,
 );
 const slowWarn = parseLogLine(
-  "[2026-07-10T12:34:56Z][WARN] query kind=sql id=db2 engine=mysql rows=0 (5200ms)",
+  "[2026-07-10T12:34:56Z][WARN] query kind=sql connection_id=db2 engine=mysql rows=0 (5200ms)",
   4,
 );
 
@@ -53,12 +53,18 @@ describe("filterLogLines - field tokens (AC-05)", () => {
     expect(filterLogLines(lines, "kind:sql")).toEqual([queryPgOk, slowWarn]);
   });
 
-  // AC-05 - behavior: id:db1 matches lines whose id kv CONTAINS db1 (substring), not exact.
-  it("should match id kv by case-insensitive substring", () => {
-    expect(filterLogLines(lines, "id:db1")).toEqual([connectOk, connectErr]);
-    expect(filterLogLines(lines, "id:DB1")).toEqual([connectOk, connectErr]);
-    // "db" is a substring of every id, so all lines match.
-    expect(filterLogLines(lines, "id:db")).toEqual(lines);
+  // AC-05 - behavior: connection_id:db1 matches lines whose connection_id kv CONTAINS db1 (substring), not exact.
+  it("should match connection_id kv by case-insensitive substring", () => {
+    expect(filterLogLines(lines, "connection_id:db1")).toEqual([
+      connectOk,
+      connectErr,
+    ]);
+    expect(filterLogLines(lines, "connection_id:DB1")).toEqual([
+      connectOk,
+      connectErr,
+    ]);
+    // "db" is a substring of every connection_id, so all lines match.
+    expect(filterLogLines(lines, "connection_id:db")).toEqual(lines);
   });
 });
 
@@ -72,7 +78,7 @@ describe("filterLogLines - quoted message term (AC-06)", () => {
   });
 
   // AC-06 - behavior: the message field is matched, not kv - a kv-only value does not leak into
-  // a message search unless it is literally in the message string (it is, e.g. "id=db1").
+  // a message search unless it is literally in the message string (it is, e.g. "connection_id=db1").
   it("should not match a quoted message term that appears nowhere in message", () => {
     expect(filterLogLines(lines, 'message:"totally absent phrase"')).toEqual([]);
   });

@@ -48,9 +48,73 @@ function sqlLiteral(value: Cell): string {
   return value === null ? "NULL" : `'${value.replace(/'/g, "''")}'`;
 }
 
+// SQL types whose values are written as bare literals (no quotes) in the preview, so the editor
+// colours them as numbers/keywords instead of strings - matching how the value is actually sent
+// (a typed bind, not a quoted string). Matched as a substring of the lower-cased data type so
+// `int4`, `bigint`, `numeric(10,2)`, `double precision`, `bool` all hit. Everything else (text,
+// varchar, uuid, timestamp, json, ...) stays quoted, which is the correct SQL literal form.
+const UNQUOTED_TYPE_PATTERNS = [
+  "int",
+  "serial",
+  "numeric",
+  "decimal",
+  "real",
+  "double",
+  "float",
+  "bool",
+];
+
+function isUnquotedType(dataType: string | undefined): boolean {
+  if (!dataType) {
+    return false;
+  }
+  const lower = dataType.toLowerCase();
+  return UNQUOTED_TYPE_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+// A boolean column's value only ever emits bare `true`/`false`/NULL; a numeric column emits its
+// value verbatim ONLY when it is a well-formed number, else it falls back to a quoted literal so a
+// stray/edited non-numeric value never produces invalid SQL in the preview.
+function isNumericText(value: string): boolean {
+  return value.trim() !== "" && Number.isFinite(Number(value));
+}
+
+// Formats a cell for the preview, quoting by the column's SQL type: numeric/boolean types emit a
+// bare literal (so the editor highlights them as a number/keyword), every other type is a quoted
+// string. Without a resolved type (Mongo path, or a value whose column is unknown) it falls back to
+// the always-quote `sqlLiteral`, preserving the prior behaviour.
+function sqlValue(
+  value: Cell,
+  dataType: string | undefined,
+): string {
+  if (value === null) {
+    return "NULL";
+  }
+  if (!isUnquotedType(dataType)) {
+    return sqlLiteral(value);
+  }
+  const lower = (dataType ?? "").toLowerCase();
+  if (lower.includes("bool")) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "t" || normalized === "1") {
+      return "true";
+    }
+    if (normalized === "false" || normalized === "f" || normalized === "0") {
+      return "false";
+    }
+    return sqlLiteral(value);
+  }
+  return isNumericText(value) ? value.trim() : sqlLiteral(value);
+}
+
+// Resolves a column's SQL data type by name (null/undefined = unknown -> the value is quoted). The
+// table card supplies this from the fetched column metadata; the filter-only / Mongo callers omit it.
+export type ColumnTypeResolver = (column: string) => string | undefined;
+
 function sqlPreview(
   engine: ConnectionConfig["engine"],
   schema: string | null,
+  resolveType: ColumnTypeResolver,
 ): QueryPreview {
   return {
     fetch: (table, filter, sort, limit, offset) => {
@@ -62,17 +126,19 @@ function sqlPreview(
       return `SELECT * FROM ${qualifiedIdent(engine, schema, table)}${where}${order} LIMIT ${limit}${offsetClause}`;
     },
     update: (table, column, newValue, pkColumn, pkValue) =>
-      `UPDATE ${qualifiedIdent(engine, schema, table)} SET ${quoteIdent(engine, column)} = ${sqlLiteral(newValue)} WHERE ${quoteIdent(engine, pkColumn)} = ${sqlLiteral(pkValue)}`,
+      `UPDATE ${qualifiedIdent(engine, schema, table)} SET ${quoteIdent(engine, column)} = ${sqlValue(newValue, resolveType(column))} WHERE ${quoteIdent(engine, pkColumn)} = ${sqlValue(pkValue, resolveType(pkColumn))}`,
     insert: (table, values) => {
       const entries = Object.entries(values);
       const columns = entries
         .map(([column]) => quoteIdent(engine, column))
         .join(", ");
-      const cells = entries.map(([, value]) => sqlLiteral(value)).join(", ");
+      const cells = entries
+        .map(([column, value]) => sqlValue(value, resolveType(column)))
+        .join(", ");
       return `INSERT INTO ${qualifiedIdent(engine, schema, table)} (${columns}) VALUES (${cells})`;
     },
     remove: (table, pkColumn, pkValue) =>
-      `DELETE FROM ${qualifiedIdent(engine, schema, table)} WHERE ${quoteIdent(engine, pkColumn)} = ${sqlLiteral(pkValue)}`,
+      `DELETE FROM ${qualifiedIdent(engine, schema, table)} WHERE ${quoteIdent(engine, pkColumn)} = ${sqlValue(pkValue, resolveType(pkColumn))}`,
     // The filter is wrapped as a single `WHERE (<expr>)`; a `;` would be a second statement.
     validateFilter: (text) =>
       text.includes(";")
@@ -143,8 +209,11 @@ function mongoPreview(): QueryPreview {
 export function queryPreview(
   engine: ConnectionConfig["engine"],
   schema: string | null,
+  resolveType: ColumnTypeResolver = () => undefined,
 ): QueryPreview {
-  return engine === "mongodb" ? mongoPreview() : sqlPreview(engine, schema);
+  return engine === "mongodb"
+    ? mongoPreview()
+    : sqlPreview(engine, schema, resolveType);
 }
 
 // Builds the WHERE fragment that pins a foreign-key target row: `<refCol> = <value>` per referenced

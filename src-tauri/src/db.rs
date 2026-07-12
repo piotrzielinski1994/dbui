@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::any::AnyPoolOptions;
 use sqlx::Row;
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use tokio_util::sync::CancellationToken;
 
 pub const DEFAULT_ROW_LIMIT: u32 = 200;
@@ -36,6 +36,144 @@ pub fn with_pool(connection_id: &str) -> Result<HeldConnection, String> {
         .get(connection_id)
         .cloned()
         .ok_or_else(|| format!("not connected: no connection for id '{connection_id}'"))
+}
+
+// An open manual-commit transaction (F12): a single connection pinned out of the held pool with a
+// live `BEGIN`, kept until the user commits or rolls back. While one exists for a database id,
+// EVERY connection-addressed SQL command routes through this connection (via `acquire_conn`) so a
+// read sees the uncommitted writes. The engine rides along so the command path stays config-free.
+struct TxSession {
+    conn: sqlx::pool::PoolConnection<sqlx::Any>,
+    engine: DbEngine,
+}
+
+// Process-wide registry of OPEN transactions, keyed by database id. The outer std `Mutex` is only
+// held synchronously (clone the `Arc` out, drop the lock); the inner `tokio::Mutex` serialises the
+// awaited work on the pinned connection without ever holding the registry lock across an `.await`
+// (same discipline as `with_pool`). Absent id = auto-commit (commands run on the pool).
+static TRANSACTIONS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<TxSession>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+// Clones the open-transaction handle for an id out of the registry (None = no open tx). Synchronous.
+fn tx_session(connection_id: &str) -> Option<Arc<tokio::sync::Mutex<TxSession>>> {
+    TRANSACTIONS.lock().unwrap().get(connection_id).cloned()
+}
+
+// True when the database has an open manual-commit transaction. Sync, false for an unknown id.
+pub fn transaction_state(connection_id: String) -> bool {
+    TRANSACTIONS.lock().unwrap().contains_key(&connection_id)
+}
+
+// A connection to run one command on: either the pinned transaction connection (when a tx is open
+// for the id) or a fresh connection acquired from the held pool (auto-commit). Both deref to
+// `&mut AnyConnection` via `conn()`, so every read/mutation helper takes that one shape and never
+// needs to know whether it is inside a transaction.
+enum ConnHandle {
+    Pinned {
+        guard: tokio::sync::OwnedMutexGuard<TxSession>,
+    },
+    Pooled {
+        conn: sqlx::pool::PoolConnection<sqlx::Any>,
+        engine: DbEngine,
+    },
+}
+
+impl ConnHandle {
+    fn conn(&mut self) -> &mut sqlx::AnyConnection {
+        match self {
+            ConnHandle::Pinned { guard } => &mut guard.conn,
+            ConnHandle::Pooled { conn, .. } => conn,
+        }
+    }
+
+    fn engine(&self) -> DbEngine {
+        match self {
+            ConnHandle::Pinned { guard } => guard.engine,
+            ConnHandle::Pooled { engine, .. } => *engine,
+        }
+    }
+
+    // True when this runs inside an open manual-commit transaction (the pinned connection). Only
+    // then can a statement be wrapped in a SAVEPOINT - a savepoint outside a transaction is an error.
+    fn is_pinned(&self) -> bool {
+        matches!(self, ConnHandle::Pinned { .. })
+    }
+}
+
+// Resolves the connection a command should run on: the pinned tx connection when one is open for
+// the id, else a fresh pool connection. Errors "not connected" when neither a pool nor a tx exists.
+async fn acquire_conn(connection_id: &str) -> Result<ConnHandle, String> {
+    if let Some(session) = tx_session(connection_id) {
+        return Ok(ConnHandle::Pinned {
+            guard: session.lock_owned().await,
+        });
+    }
+    let held = with_pool(connection_id)?;
+    let conn = held
+        .pool
+        .acquire()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ConnHandle::Pooled {
+        conn,
+        engine: held.engine,
+    })
+}
+
+// Opens a manual-commit transaction: acquires a dedicated connection from the held pool, issues
+// `BEGIN`, and stores it in the registry. Idempotent - a no-op when a transaction is already open
+// (the FE calls this before every write, only the first one opens the tx).
+pub async fn begin_transaction(connection_id: String) -> Result<(), String> {
+    if tx_session(&connection_id).is_some() {
+        return Ok(());
+    }
+    let held = with_pool(&connection_id)?;
+    let mut conn = held
+        .pool
+        .acquire()
+        .await
+        .map_err(|error| error.to_string())?;
+    sqlx::query("BEGIN")
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| error.to_string())?;
+    TRANSACTIONS.lock().unwrap().insert(
+        connection_id,
+        Arc::new(tokio::sync::Mutex::new(TxSession {
+            conn,
+            engine: held.engine,
+        })),
+    );
+    Ok(())
+}
+
+// Removes the open-transaction session for an id from the registry (None = none open). Split out so
+// commit/rollback take the session out synchronously, then run the final statement without holding
+// the registry lock across the await.
+fn take_tx(connection_id: &str) -> Option<Arc<tokio::sync::Mutex<TxSession>>> {
+    TRANSACTIONS.lock().unwrap().remove(connection_id)
+}
+
+// Finishes an open transaction with the given verb (`COMMIT` / `ROLLBACK`): takes the pinned
+// connection out of the registry, runs the statement, and drops the connection (returning it to the
+// pool). Errors "not connected" when no transaction is open for the id.
+async fn finish_transaction(connection_id: String, verb: &str) -> Result<(), String> {
+    let session = take_tx(&connection_id)
+        .ok_or_else(|| format!("not connected: no open transaction for id '{connection_id}'"))?;
+    let mut guard = session.lock_owned().await;
+    sqlx::query(verb)
+        .execute(&mut *guard.conn)
+        .await
+        .map_err(|error| error.to_string())
+        .map(|_| ())
+}
+
+pub async fn commit_transaction(connection_id: String) -> Result<(), String> {
+    finish_transaction(connection_id, "COMMIT").await
+}
+
+pub async fn rollback_transaction(connection_id: String) -> Result<(), String> {
+    finish_transaction(connection_id, "ROLLBACK").await
 }
 
 // Cancellation token sentinel + registry, ported from the sibling `requi` repo. A run registers
@@ -935,7 +1073,10 @@ pub async fn run_query(
     limit: u32,
     request_id: String,
 ) -> Result<Vec<QueryOutcome>, String> {
-    let held = with_pool(&connection_id)?;
+    // Resolve the connection up front (errors "not connected" here) so the select! only wraps the
+    // batch. When a manual-commit tx is open for this id, this is the pinned tx connection, so the
+    // query runs inside the transaction and sees its uncommitted writes.
+    let mut handle = acquire_conn(&connection_id).await?;
 
     let token = CancellationToken::new();
     CANCELS
@@ -949,15 +1090,22 @@ pub async fn run_query(
     tokio::select! {
         biased;
         _ = token.cancelled() => Err(CANCEL_SENTINEL.to_string()),
-        result = run_query_batch(&held, &sql, limit) => result,
+        result = run_query_batch(&mut handle, &sql, limit) => result,
     }
 }
 
-// Runs each split statement in order on a single connection acquired from the held pool, stopping
-// at (and returning) the first error so a failed statement aborts the batch. Earlier statements
-// stay applied unless the user wrapped them in a transaction.
+// Runs each split statement in order on ONE connection (the pinned tx connection or a fresh pooled
+// one), stopping at (and returning) the first error so a failed statement aborts the batch. Earlier
+// statements stay applied unless the user wrapped them in a transaction.
+//
+// Inside an open manual-commit transaction (pinned connection) each statement is wrapped in a
+// SAVEPOINT: a failure rolls back TO that savepoint before returning the error, so the transaction
+// stays usable (Postgres would otherwise mark the whole tx aborted and reject every later command
+// until ROLLBACK). This mirrors DBeaver's "use savepoint for each statement" - the user's next Run
+// works instead of hitting "current transaction is aborted". No savepoint on the pooled/auto-commit
+// path (a savepoint outside a transaction is an error).
 async fn run_query_batch(
-    held: &HeldConnection,
+    handle: &mut ConnHandle,
     sql: &str,
     limit: u32,
 ) -> Result<Vec<QueryOutcome>, String> {
@@ -966,18 +1114,55 @@ async fn run_query_batch(
         return Ok(Vec::new());
     }
 
-    let mut connection = held
-        .pool
-        .acquire()
-        .await
-        .map_err(|error| error.to_string())?;
+    let engine = handle.engine();
+    let pinned = handle.is_pinned();
+    let connection = handle.conn();
     let mut outcomes = Vec::with_capacity(statements.len());
     for statement in &statements {
-        let mut outcome = run_one_statement(held.engine, &mut connection, statement, limit).await?;
-        outcome.statement = statement.clone();
-        outcomes.push(outcome);
+        let result = run_one_in_savepoint(engine, connection, statement, limit, pinned).await;
+        match result {
+            Ok(mut outcome) => {
+                outcome.statement = statement.clone();
+                outcomes.push(outcome);
+            }
+            Err(error) => return Err(error),
+        }
     }
     Ok(outcomes)
+}
+
+// Runs one statement, wrapping it in a SAVEPOINT when inside an open transaction so a failure leaves
+// the transaction usable. Outside a transaction (`pinned` false) it runs the statement directly.
+async fn run_one_in_savepoint(
+    engine: DbEngine,
+    connection: &mut sqlx::AnyConnection,
+    statement: &str,
+    limit: u32,
+    pinned: bool,
+) -> Result<QueryOutcome, String> {
+    if !pinned {
+        return run_one_statement(engine, connection, statement, limit).await;
+    }
+    use sqlx::Executor;
+    (&mut *connection)
+        .execute("SAVEPOINT dbui_stmt")
+        .await
+        .map_err(|error| error.to_string())?;
+    match run_one_statement(engine, connection, statement, limit).await {
+        Ok(outcome) => {
+            // Best-effort release; a failed release does not invalidate the committed work.
+            let _ = (&mut *connection).execute("RELEASE SAVEPOINT dbui_stmt").await;
+            Ok(outcome)
+        }
+        Err(error) => {
+            // Undo just this statement so the transaction stays alive for the next command.
+            (&mut *connection)
+                .execute("ROLLBACK TO SAVEPOINT dbui_stmt")
+                .await
+                .map_err(|rollback_error| format!("{error}; savepoint rollback failed: {rollback_error}"))?;
+            Err(error)
+        }
+    }
 }
 
 // Dispatches a single statement to the per-engine runner. Postgres avoids preparing arbitrary SQL
@@ -1263,8 +1448,14 @@ fn table_refs(rows: &[sqlx::any::AnyRow], has_schema_column: bool) -> Result<Vec
         .collect()
 }
 
-// Closes and removes the held pool for a connection id. A no-op for an unknown id.
+// Closes and removes the held pool for a connection id. A no-op for an unknown id. An open
+// manual-commit transaction is rolled back first so disconnect never leaks an idle-in-transaction
+// connection (its pinned connection is dropped back to the pool before the pool closes).
 pub async fn disconnect_database(connection_id: String) {
+    if let Some(session) = take_tx(&connection_id) {
+        let mut guard = session.lock_owned().await;
+        let _ = sqlx::query("ROLLBACK").execute(&mut *guard.conn).await;
+    }
     let held = POOLS.lock().unwrap().remove(&connection_id);
     if let Some(held) = held {
         held.pool.close().await;
@@ -1272,13 +1463,14 @@ pub async fn disconnect_database(connection_id: String) {
 }
 
 pub async fn fetch_schema(connection_id: String) -> Result<Vec<TableSchema>, String> {
-    let held = with_pool(&connection_id)?;
+    let mut handle = acquire_conn(&connection_id).await?;
+    let engine = handle.engine();
 
     // Postgres leads with `table_schema` (4 columns) so the autocomplete groups can disambiguate
     // same-named tables across schemas; MySQL/SQLite have no schema level (3 columns -> None).
-    let has_schema_column = matches!(held.engine, DbEngine::Postgres);
-    let rows = sqlx::query(schema_query(held.engine))
-        .fetch_all(&held.pool)
+    let has_schema_column = matches!(engine, DbEngine::Postgres);
+    let rows = sqlx::query(schema_query(engine))
+        .fetch_all(handle.conn())
         .await
         .map_err(|error| error.to_string())?
         .iter()
@@ -1337,15 +1529,16 @@ pub async fn count_table_rows(
     table: String,
     filter: Option<String>,
 ) -> Result<i64, String> {
-    let held = with_pool(&connection_id)?;
+    let mut handle = acquire_conn(&connection_id).await?;
+    let engine = handle.engine();
 
     sqlx::query(&build_count_query(
-        held.engine,
+        engine,
         schema.as_deref(),
         &table,
         filter.as_deref(),
     ))
-    .fetch_one(&held.pool)
+    .fetch_one(handle.conn())
     .await
     .map_err(|error| error.to_string())?
     .try_get::<i64, _>(0)
@@ -1361,11 +1554,12 @@ pub async fn fetch_table_rows(
     filter: Option<String>,
     sort: Option<Sort>,
 ) -> Result<TableRows, String> {
-    let held = with_pool(&connection_id)?;
+    let mut handle = acquire_conn(&connection_id).await?;
+    let engine = handle.engine();
 
     read_table_rows(
-        &held.pool,
-        held.engine,
+        handle.conn(),
+        engine,
         schema.as_deref(),
         &table,
         limit,
@@ -1380,7 +1574,7 @@ pub async fn fetch_table_rows(
 // name as $1, and the schema as $2 only when the query is the schema-pinned Postgres form. Keeps the
 // optional-second-bind in one place so each introspection call site stays a single expression.
 async fn fetch_introspection(
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     sql: &str,
     table: &str,
     schema: Option<&str>,
@@ -1389,11 +1583,14 @@ async fn fetch_introspection(
     if let Some(schema) = schema {
         query = query.bind(schema);
     }
-    query.fetch_all(pool).await.map_err(|e| e.to_string())
+    query
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 async fn read_table_rows(
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     engine: DbEngine,
     schema: Option<&str>,
     table: &str,
@@ -1404,7 +1601,7 @@ async fn read_table_rows(
 ) -> Result<TableRows, String> {
     let has_schema = schema.is_some();
     let column_rows =
-        fetch_introspection(pool, &columns_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &columns_query(engine, has_schema), table, schema).await?;
 
     let names = column_rows
         .iter()
@@ -1428,7 +1625,7 @@ async fn read_table_rows(
     let pk_bind = pk_regclass_bind(engine, schema, table);
     let pk_rows = sqlx::query(primary_key_query(engine))
         .bind(&pk_bind)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
     let primary_key = pk_rows
@@ -1436,7 +1633,8 @@ async fn read_table_rows(
         .and_then(|row| row.try_get::<String, _>(0).ok());
 
     let type_rows =
-        fetch_introspection(pool, &column_types_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &column_types_query(engine, has_schema), table, schema)
+            .await?;
     let types: std::collections::HashMap<String, String> = type_rows
         .iter()
         .filter_map(|row| {
@@ -1448,7 +1646,7 @@ async fn read_table_rows(
         .collect();
 
     let nullable_rows =
-        fetch_introspection(pool, &nullable_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &nullable_query(engine, has_schema), table, schema).await?;
     let nullable: std::collections::HashMap<String, bool> = nullable_rows
         .iter()
         .filter_map(|row| {
@@ -1464,7 +1662,7 @@ async fn read_table_rows(
     let data_rows = sqlx::query(&build_rows_query(
         engine, schema, table, &names, limit, offset, filter, sort,
     ))
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|error| error.to_string())?;
 
@@ -1556,7 +1754,7 @@ fn fold_foreign_keys(
 // indexes, grouped foreign keys, and named check/unique constraints. Each section is one
 // introspection query on the held pool; a table with none of a section yields an empty vec.
 async fn read_table_structure(
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     engine: DbEngine,
     schema: Option<&str>,
     table: &str,
@@ -1568,7 +1766,7 @@ async fn read_table_structure(
     let pk_bind = pk_regclass_bind(engine, schema, table);
     let pk_rows = sqlx::query(primary_key_query(engine))
         .bind(&pk_bind)
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
     let pk_columns: std::collections::HashSet<String> = pk_rows
@@ -1577,7 +1775,7 @@ async fn read_table_structure(
         .collect();
 
     let column_rows =
-        fetch_introspection(pool, &structure_columns_query(engine, has_schema), table, schema)
+        fetch_introspection(connection, &structure_columns_query(engine, has_schema), table, schema)
             .await?;
     let columns = column_rows
         .iter()
@@ -1602,7 +1800,7 @@ async fn read_table_structure(
         .collect();
 
     let index_rows =
-        fetch_introspection(pool, &index_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &index_query(engine, has_schema), table, schema).await?;
     let index_tuples = index_rows
         .iter()
         .filter_map(|row| {
@@ -1617,7 +1815,7 @@ async fn read_table_structure(
     let indexes = fold_indexes(&index_tuples);
 
     let fk_rows =
-        fetch_introspection(pool, &foreign_key_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &foreign_key_query(engine, has_schema), table, schema).await?;
     let fk_tuples = fk_rows
         .iter()
         .filter_map(|row| {
@@ -1633,7 +1831,7 @@ async fn read_table_structure(
     let foreign_keys = fold_foreign_keys(&fk_tuples);
 
     let constraint_rows =
-        fetch_introspection(pool, &constraint_query(engine, has_schema), table, schema).await?;
+        fetch_introspection(connection, &constraint_query(engine, has_schema), table, schema).await?;
     let constraints = constraint_rows
         .iter()
         .filter_map(|row| {
@@ -1669,8 +1867,9 @@ pub async fn fetch_table_structure(
     schema: Option<String>,
     table: String,
 ) -> Result<TableStructure, String> {
-    let held = with_pool(&connection_id)?;
-    read_table_structure(&held.pool, held.engine, schema.as_deref(), &table).await
+    let mut handle = acquire_conn(&connection_id).await?;
+    let engine = handle.engine();
+    read_table_structure(handle.conn(), engine, schema.as_deref(), &table).await
 }
 
 // A batch of row-level changes the table card stages and applies on Save. Internally tagged by
@@ -1940,20 +2139,23 @@ pub async fn apply_row_mutations(
     table: String,
     mutations: Vec<RowMutation>,
 ) -> Result<u64, String> {
-    let held = with_pool(&connection_id)?;
-    apply_mutations(&held.pool, held.engine, schema.as_deref(), &table, &mutations).await
+    let mut handle = acquire_conn(&connection_id).await?;
+    let engine = handle.engine();
+    let pinned = handle.is_pinned();
+    apply_mutations(handle.conn(), engine, schema.as_deref(), &table, &mutations, pinned).await
 }
 
 async fn apply_mutations(
-    pool: &sqlx::AnyPool,
+    connection: &mut sqlx::AnyConnection,
     engine: DbEngine,
     schema: Option<&str>,
     table: &str,
     mutations: &[RowMutation],
+    pinned: bool,
 ) -> Result<u64, String> {
     let pk_rows = sqlx::query(primary_key_query(engine))
         .bind(pk_regclass_bind(engine, schema, table))
-        .fetch_all(pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(|error| error.to_string())?;
     let pk_columns = pk_rows
@@ -1968,7 +2170,7 @@ async fn apply_mutations(
         .ok_or_else(|| format!("table '{table}' has no primary key; cannot edit"))?;
 
     let type_rows = fetch_introspection(
-        pool,
+        connection,
         &column_types_query(engine, schema.is_some()),
         table,
         schema,
@@ -1986,17 +2188,64 @@ async fn apply_mutations(
     let mut affected = 0;
     for mutation in mutations {
         let (sql, binds) = build_mutation(engine, schema, table, pk_column, &column_types, mutation)?;
-        let mut query = sqlx::query(&sql);
-        for bind in &binds {
-            query = query.bind(bind);
-        }
-        let result = query
-            .execute(pool)
-            .await
-            .map_err(|error| error.to_string())?;
-        affected += result.rows_affected();
+        // Inside an open manual-commit transaction, wrap each mutation in a SAVEPOINT so a failure
+        // (e.g. a constraint violation) rolls back only that mutation and leaves the transaction
+        // usable, instead of poisoning it (mirrors run_query_batch + DBeaver). No savepoint on the
+        // pooled/auto-commit path.
+        let result = execute_mutation_in_savepoint(connection, &sql, &binds, pinned).await?;
+        affected += result;
     }
     Ok(affected)
+}
+
+// Executes one bound mutation, wrapping it in a SAVEPOINT when inside an open transaction so a
+// failure leaves the transaction usable (rolls back only this mutation). Returns rows-affected.
+async fn execute_mutation_in_savepoint(
+    connection: &mut sqlx::AnyConnection,
+    sql: &str,
+    binds: &[String],
+    pinned: bool,
+) -> Result<u64, String> {
+    use sqlx::Executor;
+    if !pinned {
+        return run_bound_mutation(connection, sql, binds).await;
+    }
+    (&mut *connection)
+        .execute("SAVEPOINT dbui_stmt")
+        .await
+        .map_err(|error| error.to_string())?;
+    match run_bound_mutation(connection, sql, binds).await {
+        Ok(affected) => {
+            let _ = (&mut *connection).execute("RELEASE SAVEPOINT dbui_stmt").await;
+            Ok(affected)
+        }
+        Err(error) => {
+            (&mut *connection)
+                .execute("ROLLBACK TO SAVEPOINT dbui_stmt")
+                .await
+                .map_err(|rollback_error| {
+                    format!("{error}; savepoint rollback failed: {rollback_error}")
+                })?;
+            Err(error)
+        }
+    }
+}
+
+// Binds + executes one mutation SQL, returning rows-affected.
+async fn run_bound_mutation(
+    connection: &mut sqlx::AnyConnection,
+    sql: &str,
+    binds: &[String],
+) -> Result<u64, String> {
+    let mut query = sqlx::query(sql);
+    for bind in binds {
+        query = query.bind(bind);
+    }
+    query
+        .execute(&mut *connection)
+        .await
+        .map(|result| result.rows_affected())
+        .map_err(|error| error.to_string())
 }
 
 // Translates one staged mutation into (sql, binds). Cell + Insert resolve each column's type from
@@ -3915,5 +4164,431 @@ mod tests {
             keys[0].referenced_columns,
             vec!["org".to_string(), "id".to_string()]
         );
+    }
+}
+
+// F12 manual-commit transaction mode. These tests drive the planned command-layer transaction seam
+// against a REAL, in-process SQLite database (no Docker) so BEGIN/COMMIT/ROLLBACK and read-routing
+// through the pinned connection are exercised for real.
+//
+// ASSUMED SIGNATURES (adjust the calls below if the implementation lands them differently - the
+// module is RED-by-compile until the four fns exist, so the sync/async detail is moot for the RED
+// gate). `with_pool` is synchronous, so `transaction_state` is assumed synchronous too:
+//   pub async fn begin_transaction(connection_id: String) -> Result<(), String>
+//   pub async fn commit_transaction(connection_id: String) -> Result<(), String>
+//   pub async fn rollback_transaction(connection_id: String) -> Result<(), String>
+//   pub fn transaction_state(connection_id: String) -> bool   // false for an unknown id
+#[cfg(test)]
+mod tx_tests {
+    use super::{
+        begin_transaction, commit_transaction, connect_database, disconnect_database, rollback_transaction,
+        run_query, transaction_state, ConnectionConfig, DEFAULT_ROW_LIMIT,
+    };
+    use std::sync::Once;
+
+    // sqlx panics if the Any drivers are installed twice; production installs them in lib.rs::run,
+    // the test binary must install them once itself before any pool opens.
+    static DRIVERS: Once = Once::new();
+    fn init_drivers() {
+        DRIVERS.call_once(|| {
+            sqlx::any::install_default_drivers();
+        });
+    }
+
+    // A fresh, empty, file-backed SQLite database under /tmp (a 0-byte file is a valid empty SQLite
+    // db; it must EXIST because connect_database opens without create_if_missing). /tmp is used
+    // instead of env::temp_dir() so the path carries no `+`/space that PATH_ENCODE_SET would encode
+    // and break the sqlite:// URL. Unique per test (nanos + tag) so parallel tests never collide.
+    fn temp_sqlite(tag: &str) -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = format!("/tmp/dbui-tx-{tag}-{nanos}.db");
+        std::fs::write(&path, b"").expect("create empty sqlite file");
+        path
+    }
+
+    fn cleanup(file: &str) {
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_file(format!("{file}-journal"));
+        let _ = std::fs::remove_file(format!("{file}-wal"));
+        let _ = std::fs::remove_file(format!("{file}-shm"));
+    }
+
+    fn sqlite(file: &str) -> ConnectionConfig {
+        ConnectionConfig::Sqlite {
+            file: file.to_string(),
+        }
+    }
+
+    // Convenience: run one statement on the held connection and unwrap. `req` must be unique per
+    // call (it keys the cancel registry).
+    async fn exec(id: &str, sql: &str, req: &str) -> Vec<super::QueryOutcome> {
+        run_query(id.to_string(), sql.to_string(), DEFAULT_ROW_LIMIT, req.to_string())
+            .await
+            .unwrap_or_else(|error| panic!("run_query({sql}) failed: {error}"))
+    }
+
+    // TC-001, AC-002, AC-003 - behavior (begin opens the tx; an INSERT then a SELECT on the SAME id
+    // route through the pinned connection, so the SELECT sees the uncommitted insert)
+    #[tokio::test]
+    async fn should_see_uncommitted_insert_through_the_pinned_connection_after_begin() {
+        init_drivers();
+        let file = temp_sqlite("tc001");
+        let id = "tx-tc001";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)", "c1").await;
+
+        begin_transaction(id.to_string()).await.expect("begin");
+        assert!(
+            transaction_state(id.to_string()),
+            "transaction_state must be true right after begin_transaction"
+        );
+
+        exec(id, "INSERT INTO t (id, name) VALUES (1, 'alice')", "c2").await;
+
+        let out = exec(id, "SELECT id, name FROM t", "c3").await;
+        let rows = &out[0].rows;
+        assert_eq!(
+            rows.len(),
+            1,
+            "the pinned SELECT must see the uncommitted insert (reads route through the tx conn)"
+        );
+        assert_eq!(rows[0][1], Some("alice".to_string()));
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // TC-002, AC-004 - behavior (commit persists the row; a later auto-commit SELECT still sees it,
+    // and transaction_state reports the tx closed)
+    #[tokio::test]
+    async fn should_persist_the_row_and_close_the_tx_after_commit() {
+        init_drivers();
+        let file = temp_sqlite("tc002");
+        let id = "tx-tc002";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)", "c1").await;
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "INSERT INTO t (id, name) VALUES (1, 'alice')", "c2").await;
+
+        commit_transaction(id.to_string()).await.expect("commit");
+        assert!(
+            !transaction_state(id.to_string()),
+            "transaction_state must be false after commit"
+        );
+
+        // A fresh SELECT now runs on the pool (auto-commit path) - it must still see the committed row.
+        let out = exec(id, "SELECT id FROM t", "c3").await;
+        assert_eq!(out[0].rows.len(), 1, "a committed row must survive on a fresh connection");
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // TC-003, AC-005 - behavior (rollback discards the insert; a later SELECT does NOT see it, and
+    // transaction_state reports the tx closed)
+    #[tokio::test]
+    async fn should_discard_the_row_and_close_the_tx_after_rollback() {
+        init_drivers();
+        let file = temp_sqlite("tc003");
+        let id = "tx-tc003";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)", "c1").await;
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "INSERT INTO t (id, name) VALUES (1, 'alice')", "c2").await;
+
+        rollback_transaction(id.to_string()).await.expect("rollback");
+        assert!(
+            !transaction_state(id.to_string()),
+            "transaction_state must be false after rollback"
+        );
+
+        let out = exec(id, "SELECT id FROM t", "c3").await;
+        assert_eq!(
+            out[0].rows.len(),
+            0,
+            "the rolled-back insert must be gone on a fresh connection"
+        );
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // TC-004, AC-003, AC-005 - behavior (isolation, in-process form): inside the open tx the pinned
+    // read sees its OWN uncommitted DELETE (0 rows), and after rollback the rows are restored on a
+    // fresh connection. True cross-connection MVCC (a second connection NOT seeing the dirty delete)
+    // is covered by the ignored live-Postgres test below - SQLite's rollback-journal locking makes a
+    // deterministic cross-connection read brittle, so the reliable in-process assertion is used here.
+    #[tokio::test]
+    async fn should_hide_a_deleted_row_inside_the_tx_and_restore_it_on_rollback() {
+        init_drivers();
+        let file = temp_sqlite("tc004");
+        let id = "tx-tc004";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY)", "c1").await;
+        exec(id, "INSERT INTO t (id) VALUES (1), (2), (3)", "c2").await;
+
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "DELETE FROM t", "c3").await;
+
+        let in_tx = exec(id, "SELECT id FROM t", "c4").await;
+        assert_eq!(
+            in_tx[0].rows.len(),
+            0,
+            "the pinned read must see its own uncommitted DELETE (empty)"
+        );
+
+        rollback_transaction(id.to_string()).await.expect("rollback");
+
+        let after = exec(id, "SELECT id FROM t", "c5").await;
+        assert_eq!(
+            after[0].rows.len(),
+            3,
+            "rollback must restore the deleted rows on a fresh connection"
+        );
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // TC-005, AC-007 - behavior (disconnecting with an open tx auto-rolls-back and cleans the tx
+    // registry, so it never leaks an idle-in-transaction connection): after disconnect the state is
+    // closed, and reconnecting the same file does NOT see the uncommitted insert.
+    #[tokio::test]
+    async fn should_auto_rollback_an_open_tx_on_disconnect() {
+        init_drivers();
+        let file = temp_sqlite("tc005");
+        let id = "tx-tc005";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY)", "c1").await;
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "INSERT INTO t (id) VALUES (1)", "c2").await;
+
+        disconnect_database(id.to_string()).await;
+        assert!(
+            !transaction_state(id.to_string()),
+            "disconnect must clear the tx registry (no leaked open tx)"
+        );
+
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("reconnect");
+        let out = exec(id, "SELECT id FROM t", "c3").await;
+        assert_eq!(
+            out[0].rows.len(),
+            0,
+            "an uncommitted insert must be rolled back when its database is disconnected"
+        );
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // TC-006, AC-009 - side-effect-contract (begin/commit/rollback on an id with no held pool return
+    // the clear not-connected error, and transaction_state returns false - never a panic)
+    #[tokio::test]
+    async fn should_report_not_connected_for_tx_commands_on_an_unknown_id() {
+        init_drivers();
+        let id = "tx-never-connected";
+
+        assert!(
+            !transaction_state(id.to_string()),
+            "transaction_state on an unknown id must be false, not a panic"
+        );
+
+        for result in [
+            begin_transaction(id.to_string()).await,
+            commit_transaction(id.to_string()).await,
+            rollback_transaction(id.to_string()).await,
+        ] {
+            assert!(result.is_err(), "a tx command on an unknown id must return Err");
+            let message = result.err().unwrap().to_lowercase();
+            assert!(
+                message.contains("not connected") || message.contains("no connection"),
+                "expected a clear not-connected error, got: {message}"
+            );
+        }
+    }
+
+    // SMOKE (SQLite): the per-statement SAVEPOINT / RELEASE / ROLLBACK-TO wrapping runs cleanly and
+    // commits exactly the successful rows. NOTE this does NOT prove poisoning-recovery: SQLite does
+    // not mark a tx aborted on a statement error (the "current transaction is aborted" symptom is
+    // Postgres-specific), so a failed-then-valid write recovers here even WITHOUT the savepoint. The
+    // real recovery guard is the #[ignore] live-PG test below; this pins that the savepoint SQL is
+    // valid and a commit after a failed statement yields exactly the successful rows.
+    #[tokio::test]
+    async fn should_commit_only_successful_rows_with_savepoint_wrapping() {
+        init_drivers();
+        let file = temp_sqlite("tcsp");
+        let id = "tx-savepoint";
+        connect_database(id.to_string(), sqlite(&file))
+            .await
+            .expect("connect");
+
+        exec(id, "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)", "c1").await;
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "INSERT INTO t (id, name) VALUES (1, 'alice')", "c2").await;
+
+        // A duplicate primary key fails - the savepoint must roll back just this statement.
+        let failed = run_query(
+            id.to_string(),
+            "INSERT INTO t (id, name) VALUES (1, 'dup')".to_string(),
+            DEFAULT_ROW_LIMIT,
+            "c3".to_string(),
+        )
+        .await;
+        assert!(failed.is_err(), "the duplicate-key insert must fail");
+
+        // The transaction is still usable: a fresh valid write succeeds instead of erroring with an
+        // aborted-transaction message.
+        let recovered = run_query(
+            id.to_string(),
+            "INSERT INTO t (id, name) VALUES (2, 'bob')".to_string(),
+            DEFAULT_ROW_LIMIT,
+            "c4".to_string(),
+        )
+        .await;
+        assert!(
+            recovered.is_ok(),
+            "a valid write after a failed one must succeed (tx not poisoned): {recovered:?}"
+        );
+
+        commit_transaction(id.to_string()).await.expect("commit");
+
+        // Exactly the two successful rows are committed; the failed duplicate left nothing behind.
+        let out = exec(id, "SELECT id FROM t ORDER BY id", "c5").await;
+        assert_eq!(
+            out[0].rows.len(),
+            2,
+            "only the two successful inserts must be committed"
+        );
+
+        disconnect_database(id.to_string()).await;
+        cleanup(&file);
+    }
+
+    // Live cross-connection isolation (true MVCC) against the docker test-stack Postgres (host port
+    // 55432, dbui/dbui, db dbui_test). Ignored by default like the mongo smoke; run with:
+    //   cargo test --manifest-path src-tauri/Cargo.toml live_pg_manual_commit -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_pg_manual_commit_isolates_uncommitted_writes_across_connections() {
+        init_drivers();
+        let pg = || ConnectionConfig::Postgres {
+            host: "localhost".to_string(),
+            port: 55432,
+            database: "dbui_test".to_string(),
+            user: "dbui".to_string(),
+            password: "dbui".to_string(),
+        };
+        let a = "live-tx-a";
+        let b = "live-tx-b";
+        connect_database(a.to_string(), pg()).await.expect("connect a");
+        connect_database(b.to_string(), pg()).await.expect("connect b");
+
+        exec(
+            a,
+            "DROP TABLE IF EXISTS tx_iso; CREATE TABLE tx_iso (id int primary key); \
+             INSERT INTO tx_iso VALUES (1), (2), (3)",
+            "seed",
+        )
+        .await;
+
+        begin_transaction(a.to_string()).await.expect("begin a");
+        exec(a, "DELETE FROM tx_iso", "del").await;
+
+        // B is a DIFFERENT connection with no open tx: it must NOT see A's uncommitted delete.
+        let vb = exec(b, "SELECT id FROM tx_iso", "vb1").await;
+        assert_eq!(vb[0].rows.len(), 3, "B must still see all rows before A commits");
+
+        // A (pinned) sees its own delete.
+        let va = exec(a, "SELECT id FROM tx_iso", "va1").await;
+        assert_eq!(va[0].rows.len(), 0, "A must see its own uncommitted delete");
+
+        commit_transaction(a.to_string()).await.expect("commit a");
+        let vb2 = exec(b, "SELECT id FROM tx_iso", "vb2").await;
+        assert_eq!(vb2[0].rows.len(), 0, "after A commits, B must see the delete");
+
+        exec(a, "DROP TABLE IF EXISTS tx_iso", "drop").await;
+        disconnect_database(a.to_string()).await;
+        disconnect_database(b.to_string()).await;
+    }
+
+    // Live-PG proof of the per-statement SAVEPOINT recovery: on Postgres a failed statement marks
+    // the whole transaction aborted, so WITHOUT the savepoint the next command errors with "current
+    // transaction is aborted". With the savepoint the failed statement is rolled back on its own and
+    // a later valid write succeeds + commits. This is the DBeaver-parity behaviour the SQLite smoke
+    // above cannot prove. Run with the docker stack up:
+    //   cargo test --manifest-path src-tauri/Cargo.toml live_pg_savepoint -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_pg_savepoint_keeps_tx_usable_after_a_failed_statement() {
+        init_drivers();
+        let pg = ConnectionConfig::Postgres {
+            host: "localhost".to_string(),
+            port: 55432,
+            database: "dbui_test".to_string(),
+            user: "dbui".to_string(),
+            password: "dbui".to_string(),
+        };
+        let id = "live-tx-sp";
+        connect_database(id.to_string(), pg).await.expect("connect");
+
+        exec(
+            id,
+            "DROP TABLE IF EXISTS tx_sp; CREATE TABLE tx_sp (id int primary key)",
+            "seed",
+        )
+        .await;
+
+        begin_transaction(id.to_string()).await.expect("begin");
+        exec(id, "INSERT INTO tx_sp VALUES (1)", "ok1").await;
+
+        // Duplicate PK - fails, and on Postgres would abort the whole tx without the savepoint.
+        let failed = run_query(
+            id.to_string(),
+            "INSERT INTO tx_sp VALUES (1)".to_string(),
+            DEFAULT_ROW_LIMIT,
+            "dup".to_string(),
+        )
+        .await;
+        assert!(failed.is_err(), "duplicate-key insert must fail");
+
+        // The savepoint rolled back only the failed insert; the tx is still usable.
+        let recovered = run_query(
+            id.to_string(),
+            "INSERT INTO tx_sp VALUES (2)".to_string(),
+            DEFAULT_ROW_LIMIT,
+            "ok2".to_string(),
+        )
+        .await;
+        assert!(
+            recovered.is_ok(),
+            "a valid write after a failed one must succeed on Postgres (savepoint recovery): {recovered:?}"
+        );
+
+        commit_transaction(id.to_string()).await.expect("commit");
+        let out = exec(id, "SELECT id FROM tx_sp ORDER BY id", "check").await;
+        assert_eq!(out[0].rows.len(), 2, "rows 1 and 2 committed; the duplicate left nothing");
+
+        exec(id, "DROP TABLE IF EXISTS tx_sp", "drop").await;
+        disconnect_database(id.to_string()).await;
     }
 }

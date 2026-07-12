@@ -263,6 +263,49 @@ function ReadOnlyField({
   );
 }
 
+// Per-database Manual-commit toggle: when on, the database runs auto-commit OFF - the first write
+// opens a transaction and a Commit/Rollback control finishes it. A prod safety cue paired with
+// Read-only. Same square switch chrome as ReadOnlyField - obeys design.md (no rounded corners).
+function ManualCommitField({
+  nodeId,
+  manualCommit,
+}: {
+  nodeId: string;
+  manualCommit: boolean;
+}) {
+  const { setDatabaseManualCommit } = useWorkspace();
+  return (
+    <Field label="Manual commit" htmlFor="conn-manual-commit">
+      <div className="flex items-center gap-2">
+        <button
+          id="conn-manual-commit"
+          type="button"
+          role="switch"
+          aria-checked={manualCommit}
+          onClick={() => setDatabaseManualCommit(nodeId, !manualCommit)}
+          className={cn(
+            "relative flex h-5 w-9 shrink-0 items-center border border-border transition-colors",
+            manualCommit ? "bg-primary" : "bg-muted",
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "block size-4 transition-transform",
+              manualCommit
+                ? "translate-x-4 bg-primary-foreground"
+                : "translate-x-0.5 bg-foreground",
+            )}
+          />
+        </button>
+        <span className="text-xs text-muted-foreground">
+          Writes stay open until you Commit
+        </span>
+      </div>
+    </Field>
+  );
+}
+
 function PasswordField({
   value,
   onChange,
@@ -342,6 +385,7 @@ function ConnectionForm({ node }: { node: DatabaseNode }) {
       </Field>
       <AccentField nodeId={nodeId} accentColor={node.accentColor} />
       <ReadOnlyField nodeId={nodeId} readOnly={node.readOnly} />
+      <ManualCommitField nodeId={nodeId} manualCommit={node.manualCommit} />
       <Field label="Type" htmlFor="conn-engine">
         <Select
           value={form.engine}

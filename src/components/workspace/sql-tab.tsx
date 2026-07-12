@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { EditorView } from "@codemirror/view";
 import { toast } from "sonner";
 import { Plus, X } from "lucide-react";
@@ -28,6 +28,7 @@ import { isWriteSql, isWriteMongo } from "@/lib/script/dispatch";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import {
+  beginTransaction,
   cancelQuery,
   executeMongo,
   executeSql,
@@ -338,7 +339,7 @@ function SqlPane({
   savedScripts,
   collections,
 }: {
-  node: { id: string; sql: string; readOnly: boolean };
+  node: { id: string; sql: string; readOnly: boolean; manualCommit: boolean };
   connectionId: string;
   isConnected: boolean;
   engine: DbEngine;
@@ -360,9 +361,11 @@ function SqlPane({
     sqlBuffers,
     setSqlBuffer,
     clearSqlBuffer,
+    appendTxStatement,
   } = useWorkspace();
   const [isSaveOpen, setIsSaveOpen] = useState(false);
   const editorRef = useRef<EditorView | null>(null);
+  const queryClient = useQueryClient();
 
   // Scripts are document tabs. Ensure the database always has at least one: if it has none, create
   // a persisted "untitled" (seeded from the node's sql, if any) so the user can type immediately.
@@ -400,7 +403,7 @@ function SqlPane({
         ? executeMongo(connectionId, query, requestId)
         : executeSql(connectionId, query, requestId);
     },
-    onSuccess: (outcomes, query) =>
+    onSuccess: (outcomes, query) => {
       // One History entry per statement so each is individually visible, each logging its OWN
       // statement text (not the whole buffer). The single-statement case logs one entry as before.
       outcomes.forEach((outcome, index) =>
@@ -411,7 +414,23 @@ function SqlPane({
           message: outcome.message,
           at: new Date().toLocaleTimeString(),
         }),
-      ),
+      );
+      // Manual-commit (F12): record only the write statements that ACTUALLY SUCCEEDED into the
+      // open-transaction list, so the Commit modal shows exactly what COMMIT will persist - not
+      // failed/retried attempts (a failed run lands in onError and is never appended). Reads are
+      // excluded (they change nothing). SQL-only - a Mongo node is never manualCommit.
+      // Manual-commit (F12): record only the write statements that ACTUALLY SUCCEEDED into the
+      // open-transaction list, so the Commit modal shows exactly what COMMIT will persist - not
+      // failed/retried attempts (a failed run lands in onError and is never appended). Reads are
+      // excluded (they change nothing). SQL-only - a Mongo node is never manualCommit.
+      if (node.manualCommit) {
+        outcomes
+          .filter((outcome) => isWriteSql(outcome.statement || query))
+          .forEach((outcome) =>
+            appendTxStatement(connectionId, outcome.statement || query),
+          );
+      }
+    },
     // A cancelled run is a neutral outcome, not an error - it is NOT logged to History.
     onError: (error, query) => {
       if (isCancelled(error)) {
@@ -428,7 +447,7 @@ function SqlPane({
   });
 
   const canRun = isConnected && sql.trim().length > 0 && !run.isPending;
-  const submit = () => {
+  const submit = async () => {
     if (!canRun) {
       return;
     }
@@ -453,6 +472,23 @@ function SqlPane({
         at: new Date().toLocaleTimeString(),
       });
       return;
+    }
+    // Manual-commit (F12): a write opens (or joins) the database's transaction before running, so
+    // it lands inside the tx that Commit/Rollback finishes. AWAIT begin before dispatching the run -
+    // begin's registry insert must land before execute_sql reads it, else the write races onto a
+    // fresh pool connection and commits OUTSIDE the tx. Idempotent - only the first write opens it.
+    // Invalidate the tx-state query so the content-header Commit/Rollback toolbar appears. Not gated
+    // to SQL here because a Mongo node is never manualCommit (the backend rejects it anyway).
+    if (node.manualCommit && isWrite) {
+      try {
+        await beginTransaction(connectionId);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      // The statement itself is recorded in `onSuccess` (only if it actually succeeds), so the
+      // Commit modal never lists a failed/retried attempt. Here we just surface the toolbar.
+      queryClient.invalidateQueries({ queryKey: ["tx-state", connectionId] });
     }
     run.mutate(effective);
   };

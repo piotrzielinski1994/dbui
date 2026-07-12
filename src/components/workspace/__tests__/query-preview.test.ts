@@ -25,6 +25,77 @@ describe("queryPreview SQL strategy", () => {
   });
 });
 
+describe("queryPreview SQL type-aware value quoting", () => {
+  // A resolver mapping the demo columns to their SQL types.
+  const resolveType = (column: string): string | undefined =>
+    ({
+      id: "int4",
+      count: "bigint",
+      price: "numeric(10,2)",
+      active: "bool",
+      name: "text",
+      created: "timestamp",
+    })[column];
+
+  // behavior (a numeric column's value is a BARE literal - no quotes - so the editor highlights it
+  // as a number, matching the typed bind actually sent)
+  it("should emit numeric column values without quotes", () => {
+    const preview = queryPreview("postgres", "public", resolveType);
+    expect(
+      preview.insert("t", { id: "123", count: "9", price: "19.99" }),
+    ).toBe(
+      'INSERT INTO "public"."t" ("id", "count", "price") VALUES (123, 9, 19.99)',
+    );
+  });
+
+  // behavior (a boolean column emits bare true/false, normalising t/f/1/0)
+  it("should emit boolean column values as bare true/false", () => {
+    const preview = queryPreview("postgres", null, resolveType);
+    expect(preview.insert("t", { active: "true" })).toBe(
+      'INSERT INTO "t" ("active") VALUES (true)',
+    );
+    expect(preview.insert("t", { active: "f" })).toBe(
+      'INSERT INTO "t" ("active") VALUES (false)',
+    );
+  });
+
+  // behavior (non-numeric / text / timestamp columns stay quoted; a NULL is bare NULL)
+  it("should keep text and timestamp values quoted and NULL bare", () => {
+    const preview = queryPreview("postgres", null, resolveType);
+    expect(
+      preview.insert("t", { name: "Ada", created: "2026-07-12", id: null }),
+    ).toBe(
+      'INSERT INTO "t" ("name", "created", "id") VALUES (\'Ada\', \'2026-07-12\', NULL)',
+    );
+  });
+
+  // behavior (a numeric column whose value is NOT a valid number falls back to a quoted literal, so
+  // the preview never emits invalid SQL for a stray value)
+  it("should quote a non-numeric value even for a numeric column", () => {
+    const preview = queryPreview("postgres", null, resolveType);
+    expect(preview.insert("t", { id: "not-a-number" })).toBe(
+      'INSERT INTO "t" ("id") VALUES (\'not-a-number\')',
+    );
+  });
+
+  // behavior (an UPDATE uses the same type-aware quoting for the SET value and the pk match)
+  it("should type-quote the UPDATE SET value and pk", () => {
+    const preview = queryPreview("postgres", null, resolveType);
+    expect(preview.update("t", "count", "5", "id", "42")).toBe(
+      'UPDATE "t" SET "count" = 5 WHERE "id" = 42',
+    );
+  });
+
+  // behavior (without a resolver every value stays quoted - the prior default, so existing callers
+  // and the Copy-as-SQL path are unchanged)
+  it("should quote every value when no type resolver is given", () => {
+    const preview = queryPreview("postgres", null);
+    expect(preview.insert("t", { id: "1" })).toBe(
+      'INSERT INTO "t" ("id") VALUES (\'1\')',
+    );
+  });
+});
+
 describe("queryPreview MongoDB strategy (TC-013)", () => {
   const preview = queryPreview("mongodb", null);
 

@@ -9,16 +9,16 @@ import { parseLogLine } from "@/lib/workspace/log-line";
 // The six formatter shapes the backend emits (connect ok/err, disconnect, query ok/err, mutations),
 // exactly as tauri-plugin-log delivers them in the `message` field.
 const CONNECT_OK =
-  "[2026-07-10T12:34:56Z][INFO] connect id=db1 engine=postgres tables=12 (34ms)";
+  "[2026-07-10T12:34:56Z][INFO] connect connection_id=db1 engine=postgres tables=12 (34ms)";
 const CONNECT_ERR =
-  "[2026-07-10T12:34:56Z][ERROR] connect id=db1 engine=mysql failed (40ms): connection refused";
-const DISCONNECT = "[2026-07-10T12:34:56Z][INFO] disconnect id=db1";
+  "[2026-07-10T12:34:56Z][ERROR] connect connection_id=db1 engine=mysql failed (40ms): connection refused";
+const DISCONNECT = "[2026-07-10T12:34:56Z][INFO] disconnect connection_id=db1";
 const QUERY_OK =
-  "[2026-07-10T12:34:56Z][INFO] query kind=sql id=db1 statements=3 rows=150 (42ms)";
+  "[2026-07-10T12:34:56Z][INFO] query kind=sql connection_id=db1 statements=3 rows=150 (42ms)";
 const QUERY_ERR =
-  "[2026-07-10T12:34:56Z][ERROR] query kind=mongo id=db1 failed (5ms): bad filter";
+  "[2026-07-10T12:34:56Z][ERROR] query kind=mongo connection_id=db1 failed (5ms): bad filter";
 const MUTATIONS =
-  "[2026-07-10T12:34:56Z][INFO] mutations id=db1 table=public.users affected=4 (7ms)";
+  "[2026-07-10T12:34:56Z][INFO] mutations connection_id=db1 table=public.users affected=4 (7ms)";
 
 const TS = "2026-07-10T12:34:56Z";
 
@@ -31,8 +31,8 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     expect(line.raw).toBe(CONNECT_OK);
     expect(line.timestamp).toBe(TS);
     expect(line.level).toBe("info");
-    expect(line.message).toBe("connect id=db1 engine=postgres tables=12 (34ms)");
-    expect(line.kv).toEqual({ id: "db1", engine: "postgres", tables: "12" });
+    expect(line.message).toBe("connect connection_id=db1 engine=postgres tables=12 (34ms)");
+    expect(line.kv).toEqual({ connection_id: "db1", engine: "postgres", tables: "12" });
   });
 
   // AC-03 - behavior: a connect-error line is error level; the space-bearing error tail
@@ -43,10 +43,10 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     expect(line.timestamp).toBe(TS);
     expect(line.level).toBe("error");
     expect(line.message).toBe(
-      "connect id=db1 engine=mysql failed (40ms): connection refused",
+      "connect connection_id=db1 engine=mysql failed (40ms): connection refused",
     );
     expect(line.message).toContain("connection refused");
-    expect(line.kv).toEqual({ id: "db1", engine: "mysql" });
+    expect(line.kv).toEqual({ connection_id: "db1", engine: "mysql" });
     expect(line.kv).not.toHaveProperty("connection");
     expect(line.kv).not.toHaveProperty("refused");
   });
@@ -56,8 +56,8 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     const line = parseLogLine(DISCONNECT, 3);
 
     expect(line.level).toBe("info");
-    expect(line.message).toBe("disconnect id=db1");
-    expect(line.kv).toEqual({ id: "db1" });
+    expect(line.message).toBe("disconnect connection_id=db1");
+    expect(line.kv).toEqual({ connection_id: "db1" });
   });
 
   // AC-03 - behavior: a query-ok line captures kind/id/statements/rows kv, timing dropped.
@@ -65,10 +65,10 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     const line = parseLogLine(QUERY_OK, 3);
 
     expect(line.level).toBe("info");
-    expect(line.message).toBe("query kind=sql id=db1 statements=3 rows=150 (42ms)");
+    expect(line.message).toBe("query kind=sql connection_id=db1 statements=3 rows=150 (42ms)");
     expect(line.kv).toEqual({
       kind: "sql",
-      id: "db1",
+      connection_id: "db1",
       statements: "3",
       rows: "150",
     });
@@ -79,9 +79,9 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     const line = parseLogLine(QUERY_ERR, 5);
 
     expect(line.level).toBe("error");
-    expect(line.message).toBe("query kind=mongo id=db1 failed (5ms): bad filter");
+    expect(line.message).toBe("query kind=mongo connection_id=db1 failed (5ms): bad filter");
     expect(line.message).toContain("bad filter");
-    expect(line.kv).toEqual({ kind: "mongo", id: "db1" });
+    expect(line.kv).toEqual({ kind: "mongo", connection_id: "db1" });
     expect(line.kv).not.toHaveProperty("filter");
   });
 
@@ -90,9 +90,9 @@ describe("parseLogLine - formatter shapes (AC-03)", () => {
     const line = parseLogLine(MUTATIONS, 3);
 
     expect(line.level).toBe("info");
-    expect(line.message).toBe("mutations id=db1 table=public.users affected=4 (7ms)");
+    expect(line.message).toBe("mutations connection_id=db1 table=public.users affected=4 (7ms)");
     expect(line.kv).toEqual({
-      id: "db1",
+      connection_id: "db1",
       table: "public.users",
       affected: "4",
     });
@@ -139,13 +139,13 @@ describe("parseLogLine - level source precedence (AC-04)", () => {
   it("should take the level from the [LEVEL] token when no numeric level is given", () => {
     expect(parseLogLine(CONNECT_ERR).level).toBe("error");
     expect(
-      parseLogLine("[2026-07-10T12:34:56Z][WARN] slow query id=db2 (5200ms)").level,
+      parseLogLine("[2026-07-10T12:34:56Z][WARN] slow query connection_id=db2 (5200ms)").level,
     ).toBe("warn");
   });
 
   // AC-04 - behavior: the full numeric mapping 1=trace,2=debug,3=info,4=warn,5=error.
   it("should map each numeric plugin level to its LogLevel", () => {
-    const base = "[2026-07-10T12:34:56Z][INFO] disconnect id=db1";
+    const base = "[2026-07-10T12:34:56Z][INFO] disconnect connection_id=db1";
     expect(parseLogLine(base, 1).level).toBe("trace");
     expect(parseLogLine(base, 2).level).toBe("debug");
     expect(parseLogLine(base, 3).level).toBe("info");

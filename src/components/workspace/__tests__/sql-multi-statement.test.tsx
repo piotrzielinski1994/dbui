@@ -55,6 +55,7 @@ const tree: TreeNode[] = [
     kind: "database",
     accentColor: null,
     readOnly: false,
+    manualCommit: false,
     id: CONNECTION_ID,
     name: "ppp",
     engine: "postgres",
@@ -175,10 +176,14 @@ describe("SqlTab multi-statement / cancel (F5)", () => {
     });
     const entries = within(historyList).getAllByRole("listitem");
     expect(entries.length).toBe(2);
-    expect(within(historyList).getByText("UPDATE t SET x = 1")).toBeInTheDocument();
+    // SqlText splits each statement across per-token spans, so match on each entry's textContent.
+    const entryText = entries.map((entry) => entry.textContent ?? "");
+    expect(entryText.some((text) => text.includes("UPDATE t SET x = 1"))).toBe(
+      true,
+    );
     expect(
-      within(historyList).getByText("SELECT id, name FROM users"),
-    ).toBeInTheDocument();
+      entryText.some((text) => text.includes("SELECT id, name FROM users")),
+    ).toBe(true);
   });
 
   // TC-012, AC-007 - behavior + side-effect-contract (while pending the control reads "Cancel";

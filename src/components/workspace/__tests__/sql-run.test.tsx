@@ -35,6 +35,7 @@ const tree: TreeNode[] = [
     kind: "database",
     accentColor: null,
     readOnly: false,
+    manualCommit: false,
     id: "db-ppp",
     name: "ppp",
     engine: "postgres",

@@ -56,6 +56,7 @@ const connectedTree: TreeNode[] = [
     kind: "database",
     accentColor: null,
     readOnly: false,
+    manualCommit: false,
     id: "db-ppp",
     name: "ppp",
     engine: "postgres",

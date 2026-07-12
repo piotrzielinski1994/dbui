@@ -151,6 +151,7 @@ export const appDb: DatabaseNode = {
   // uncolored database (accent-border feature): plain border everywhere.
   accentColor: null,
   readOnly: false,
+  manualCommit: false,
 };
 
 // folder "staging" > database "admin_db" (password variant; script "" -> Script empty E-7)
@@ -173,6 +174,7 @@ export const adminDb: DatabaseNode = {
   // colored database (accent-border feature): the red "prod" preset (50% alpha) its tables inherit.
   accentColor: "#dc262680",
   readOnly: false,
+  manualCommit: false,
 };
 
 // root-level leaf "scratch_db" (none; no tables E-5; no views/script E-7; zero-row SQL E-6)
@@ -195,6 +197,7 @@ export const scratchDb: DatabaseNode = {
   // uncolored database (accent-border feature): plain border everywhere.
   accentColor: null,
   readOnly: false,
+  manualCommit: false,
 };
 
 export const fixtureTree: TreeNode[] = [

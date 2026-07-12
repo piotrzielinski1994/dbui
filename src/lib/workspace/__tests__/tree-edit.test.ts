@@ -41,6 +41,7 @@ const database = (id: string, name = id): DatabaseNode => ({
   },
   accentColor: null,
   readOnly: false,
+  manualCommit: false,
 });
 
 const folder = (id: string, children: TreeNode[], name = id): FolderNode => ({

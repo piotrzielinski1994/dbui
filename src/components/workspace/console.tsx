@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tab, TabBar } from "@/components/workspace/tab-bar";
+import { SqlText } from "@/components/workspace/sql-text";
 import {
   useLogLines,
   useWorkspace,
@@ -157,7 +158,7 @@ function LogSearchInput({
         aria-label="Search logs"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="level:error id:db1 ..."
+        placeholder="level:error connection_id:db1 ..."
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -316,9 +317,10 @@ export function Console() {
                   key={edit.id}
                   className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0"
                 >
-                  <code className="min-w-0 flex-1 break-all whitespace-pre-wrap">
-                    {edit.sql}
-                  </code>
+                  <SqlText
+                    sql={edit.sql}
+                    className="min-w-0 flex-1 break-all whitespace-pre-wrap"
+                  />
                   <button
                     type="button"
                     aria-label={
@@ -381,9 +383,10 @@ export function Console() {
                       {entry.message}
                     </span>
                   </div>
-                  <code className="break-all whitespace-pre-wrap">
-                    {entry.sql}
-                  </code>
+                  <SqlText
+                    sql={entry.sql}
+                    className="block break-all whitespace-pre-wrap"
+                  />
                 </li>
               ))}
             </ul>

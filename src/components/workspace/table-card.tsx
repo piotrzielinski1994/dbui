@@ -30,6 +30,7 @@ import {
 } from "@/components/workspace/data-grid";
 import {
   applyRowMutations,
+  beginTransaction,
   countTable,
   fetchTable,
   fetchTableStructure,
@@ -423,6 +424,7 @@ function LiveTable({
   schema,
   filter,
   readOnly,
+  manualCommit,
 }: {
   config: ConnectionConfig;
   connectionId: string;
@@ -431,6 +433,7 @@ function LiveTable({
   schema: string | null;
   filter: string | undefined;
   readOnly: boolean;
+  manualCommit: boolean;
 }) {
   const queryClient = useQueryClient();
   const {
@@ -441,6 +444,7 @@ function LiveTable({
     addHistoryEntry,
     navigateTo,
     nodesById,
+    appendTxStatement,
   } = useWorkspace();
   const { isStructureView, toggleStructureView } = useStructureView();
   const { isMockDataOpen, closeMockData } = useMockData();
@@ -482,10 +486,21 @@ function LiveTable({
     rowIndex: number;
     text: string;
   } | null>(null);
+  // Column SQL types by name, read by the preview's type-aware value quoting (numeric/bool columns
+  // emit bare literals so the editor highlights them as numbers, everything else stays quoted). A
+  // ref because `preview` is memoised before the fetched columns are derived below; the resolver
+  // reads the latest map at call time (previews are built lazily, per edit/save, never at mount).
+  const columnTypesRef = useRef<Map<string, string>>(new Map());
   // Per-engine preview/validation strategy: SQL strings for the SQL engines, db.coll.* strings +
   // JSON filter for MongoDB. The fetch/edit/grid pipeline itself is engine-agnostic.
   const preview = useMemo(
-    () => queryPreview(config.engine, schema),
+    () =>
+      // The resolver reads the ref lazily - only when a preview string is built (an edit/save/copy
+      // handler), never during render - so this ref access is safe despite the render-phase lint.
+      // eslint-disable-next-line react-hooks/refs
+      queryPreview(config.engine, schema, (column) =>
+        columnTypesRef.current.get(column),
+      ),
     [config.engine, schema],
   );
 
@@ -653,6 +668,18 @@ function LiveTable({
       ),
     [columns, fkColumns],
   );
+  // Keep the preview's type resolver current: map each column name to its SQL data type so a numeric
+  // or boolean cell renders as a bare literal in the preview (correct highlight), everything else
+  // quoted. Written in an effect (not during render); the resolver only reads it lazily when a
+  // preview is built (an edit/save/copy), never during render, so the effect timing is fine.
+  const columnTypes = useMemo(
+    () =>
+      new Map((columns ?? []).map((column) => [column.name, column.dataType])),
+    [columns],
+  );
+  useEffect(() => {
+    columnTypesRef.current = columnTypes;
+  }, [columnTypes]);
 
   const primaryKey = data?.pages[0]?.primaryKey ?? null;
   // A read-only database disables every edit affordance by dropping `editable`, reusing the exact
@@ -961,6 +988,13 @@ function LiveTable({
       )
       .map((edit) => ({ id: edit.id, sql: edit.sql }));
     setIsSaving(true);
+    // Manual-commit (F12): open (or join) the transaction before applying, so the mutations land
+    // inside the tx that the Commit/Rollback toolbar finishes. Idempotent; invalidate the tx-state
+    // query so the toolbar appears.
+    if (manualCommit) {
+      await toResult(beginTransaction(connectionId));
+      queryClient.invalidateQueries({ queryKey: ["tx-state", connectionId] });
+    }
     const result = await toResult(
       applyRowMutations(connectionId, tableName, payload, schema),
     );
@@ -977,6 +1011,11 @@ function LiveTable({
       return;
     }
     discardPendingEditsForTable(tableId);
+    // Manual-commit (F12): record the applied statements ONLY after apply succeeded, so the Commit
+    // modal lists exactly what COMMIT will persist (a failed apply returns above and appends nothing).
+    if (manualCommit) {
+      savedSqls.forEach((entry) => appendTxStatement(connectionId, entry.sql));
+    }
     const at = new Date().toLocaleTimeString();
     const savedAt = Date.now();
     savedSqls.forEach((entry) =>
@@ -1317,6 +1356,10 @@ export function TableCard() {
   // rendering rather than a new disabled state.
   const dbNode = databaseId ? nodesById.get(databaseId) : undefined;
   const readOnly = dbNode?.kind === "database" ? dbNode.readOnly : false;
+  // The owning database's manual-commit flag (F12): when on, Save opens a transaction before
+  // applying, finished via the content-header Commit/Rollback toolbar.
+  const manualCommit =
+    dbNode?.kind === "database" ? dbNode.manualCommit : false;
   const schema =
     (databaseId ? databaseSchemas.get(databaseId) : undefined) ?? EMPTY_SCHEMA;
   const tableId = isTable ? activeNode.id : undefined;
@@ -1468,6 +1511,7 @@ export function TableCard() {
             schema={activeNode.schema}
             filter={filter}
             readOnly={readOnly}
+            manualCommit={manualCommit}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

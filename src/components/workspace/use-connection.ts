@@ -38,6 +38,7 @@ export function useConnectionActions() {
     removeConnection,
     updateDatabaseConfig,
     connectionStatus,
+    clearTxStatements,
   } = useWorkspace();
 
   const connect = async (id: string, config: ConnectionConfig) => {
@@ -82,6 +83,9 @@ export function useConnectionActions() {
     void disconnectDatabase(id);
     removeConnection(id);
     setConnectionStatus(id, "idle");
+    // The backend auto-rolls-back any open transaction on disconnect (F12); drop its recorded
+    // statement list so a later reconnect never shows stale uncommitted lines.
+    clearTxStatements(id);
   };
 
   // Aborts an in-flight connect; the connect() promise then rejects with the sentinel and resets

@@ -161,6 +161,7 @@ type WorkspaceContextValue = {
   renameDatabase: (id: string, name: string) => void;
   setDatabaseAccent: (id: string, color: string | null) => void;
   setDatabaseReadOnly: (id: string, readOnly: boolean) => void;
+  setDatabaseManualCommit: (id: string, manualCommit: boolean) => void;
   saveScript: (databaseId: string, name: string, sql: string) => boolean;
   // Overwrite the sql of an EXISTING saved script (matched by name). Used when Cmd/Ctrl+S is pressed
   // while a named script is the active document - it saves in place, no name prompt.
@@ -184,6 +185,11 @@ type WorkspaceContextValue = {
   // so its own state would otherwise reset). In-memory only - filters are ephemeral, not persisted.
   tableFilters: Map<string, string>;
   setTableFilter: (tableId: string, filter: string) => void;
+  // F12 manual-commit: the write statements in each database's open transaction, keyed by db id, in
+  // execution order (the Commit modal lists them). Appended per write, cleared on commit/rollback.
+  txStatements: Map<string, string[]>;
+  appendTxStatement: (databaseId: string, sql: string) => void;
+  clearTxStatements: (databaseId: string) => void;
   // FK-navigation back/forward history: `navigateTo` records a jump (opens the target tab + applies
   // the filter, pushing a history entry from the current position); `goBack`/`goForward` walk the
   // (tableId, filter) stack, restoring both the active tab and that table's filter. In-memory only.
@@ -380,6 +386,7 @@ function applyDatabaseConfig(
         name,
         accentColor,
         readOnly,
+        manualCommit,
         tables,
         views,
         sql,
@@ -393,6 +400,7 @@ function applyDatabaseConfig(
         name,
         accentColor,
         readOnly,
+        manualCommit,
         tables,
         views,
         sql,
@@ -413,6 +421,7 @@ function newDatabaseNode(id: string): DatabaseNode {
     name: "new_database",
     accentColor: null,
     readOnly: false,
+    manualCommit: false,
     engine: "postgres",
     host: "localhost",
     port: 5432,
@@ -528,6 +537,25 @@ function setReadOnly(
     }
     if (node.kind === "database" && node.id === databaseId) {
       return { ...node, readOnly };
+    }
+    return node;
+  });
+}
+
+function setManualCommit(
+  nodes: TreeNode[],
+  databaseId: string,
+  manualCommit: boolean,
+): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind === "folder") {
+      return {
+        ...node,
+        children: setManualCommit(node.children, databaseId, manualCommit),
+      };
+    }
+    if (node.kind === "database" && node.id === databaseId) {
+      return { ...node, manualCommit };
     }
     return node;
   });
@@ -824,6 +852,13 @@ export function WorkspaceProvider({
   const [tableFilters, setTableFilters] = useState<Map<string, string>>(
     () => new Map(),
   );
+  // The write statements run inside each database's open manual-commit transaction (F12), keyed by
+  // db id, in execution order. Appended as each write is sent (SQL Run + table Save), listed by the
+  // Commit modal so the user sees exactly what COMMIT will persist, cleared on commit/rollback/
+  // disconnect. In-memory only (like tableFilters) - a transaction never outlives the session.
+  const [txStatements, setTxStatements] = useState<Map<string, string[]>>(
+    () => new Map(),
+  );
   const [navHistory, setNavHistory] = useState<NavState>(EMPTY_NAV);
   const [activeJsScriptByDb, setActiveJsScriptByDb] = useState<
     Map<string, string>
@@ -902,6 +937,31 @@ export function WorkspaceProvider({
   const setTableFilter = useCallback(
     (tableId: string, filter: string) =>
       setTableFilters((current) => new Map(current).set(tableId, filter)),
+    [],
+  );
+  // Records one write statement into a database's open-transaction list (F12). Appended in send
+  // order as each write is dispatched; the Commit modal lists them.
+  const appendTxStatement = useCallback(
+    (databaseId: string, sql: string) =>
+      setTxStatements((current) =>
+        new Map(current).set(databaseId, [
+          ...(current.get(databaseId) ?? []),
+          sql,
+        ]),
+      ),
+    [],
+  );
+  // Drops a database's recorded transaction statements (on commit / rollback / disconnect).
+  const clearTxStatements = useCallback(
+    (databaseId: string) =>
+      setTxStatements((current) => {
+        if (!current.has(databaseId)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(databaseId);
+        return next;
+      }),
     [],
   );
   const setActiveScript = useCallback(
@@ -1125,6 +1185,8 @@ export function WorkspaceProvider({
         setTree((current) => setAccentColor(current, id, color)),
       setDatabaseReadOnly: (id, readOnly) =>
         setTree((current) => setReadOnly(current, id, readOnly)),
+      setDatabaseManualCommit: (id, manualCommit) =>
+        setTree((current) => setManualCommit(current, id, manualCommit)),
       saveScript: (databaseId, name, sql) => {
         const trimmed = name.trim();
         const node = nodesById.get(databaseId);
@@ -1167,6 +1229,9 @@ export function WorkspaceProvider({
       clearSqlBuffer,
       tableFilters,
       setTableFilter,
+      txStatements,
+      appendTxStatement,
+      clearTxStatements,
       navigateTo: (target) => {
         const from = {
           tableId: activeTabId ?? "",
@@ -1357,6 +1422,9 @@ export function WorkspaceProvider({
     clearSqlBuffer,
     tableFilters,
     setTableFilter,
+    txStatements,
+    appendTxStatement,
+    clearTxStatements,
     navHistory,
     activeJsScriptByDb,
     setActiveJsScript,

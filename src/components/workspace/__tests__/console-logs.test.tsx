@@ -21,20 +21,20 @@ import {
 
 const LOG_LINES: ReadonlyArray<{ raw: string; level: number }> = [
   {
-    raw: "[2026-07-10T12:34:56Z][INFO] connect id=db1 engine=postgres tables=12 (34ms)",
+    raw: "[2026-07-10T12:34:56Z][INFO] connect connection_id=db1 engine=postgres tables=12 (34ms)",
     level: 3,
   },
   {
-    raw: "[2026-07-10T12:34:56Z][ERROR] connect id=db1 engine=mysql failed (40ms): connection refused",
+    raw: "[2026-07-10T12:34:56Z][ERROR] connect connection_id=db1 engine=mysql failed (40ms): connection refused",
     level: 5,
   },
-  { raw: "[2026-07-10T12:34:56Z][INFO] disconnect id=db1", level: 3 },
+  { raw: "[2026-07-10T12:34:56Z][INFO] disconnect connection_id=db1", level: 3 },
   {
-    raw: "[2026-07-10T12:34:56Z][INFO] query kind=sql id=db1 statements=3 rows=150 (42ms)",
+    raw: "[2026-07-10T12:34:56Z][INFO] query kind=sql connection_id=db1 statements=3 rows=150 (42ms)",
     level: 3,
   },
   {
-    raw: "[2026-07-10T12:34:56Z][ERROR] query kind=mongo id=db1 failed (5ms): bad filter",
+    raw: "[2026-07-10T12:34:56Z][ERROR] query kind=mongo connection_id=db1 failed (5ms): bad filter",
     level: 5,
   },
 ];
@@ -124,7 +124,7 @@ describe("Console Logs tab (F18)", () => {
 
     const texts = logItemTexts();
     expect(texts).toHaveLength(LOG_LINES.length);
-    expect(texts[0]).toContain("connect id=db1 engine=postgres");
+    expect(texts[0]).toContain("connect connection_id=db1 engine=postgres");
     expect(texts.at(-1)).toContain("bad filter");
   });
 
@@ -256,7 +256,7 @@ describe("Console Logs tab (F18)", () => {
         <button
           type="button"
           onClick={() =>
-            appendLogLine("[2026-07-10T12:34:56Z][INFO] disconnect id=db1", 3)
+            appendLogLine("[2026-07-10T12:34:56Z][INFO] disconnect connection_id=db1", 3)
           }
         >
           append log
@@ -339,7 +339,7 @@ describe("Console Logs tab (F18)", () => {
     await waitFor(() => expect(emit).not.toBeNull());
     await act(async () => {
       emit?.(
-        "[2026-07-10T12:34:56Z][ERROR] query kind=mongo id=db1 failed (5ms): bad filter",
+        "[2026-07-10T12:34:56Z][ERROR] query kind=mongo connection_id=db1 failed (5ms): bad filter",
         5,
       );
     });

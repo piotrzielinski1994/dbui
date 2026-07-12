@@ -1,7 +1,7 @@
 import type { LogLine } from "@/lib/workspace/log-line";
 
 const KV_FIELDS = [
-  "id",
+  "connection_id",
   "engine",
   "kind",
   "table",

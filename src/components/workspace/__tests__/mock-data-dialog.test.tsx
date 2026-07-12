@@ -270,9 +270,10 @@ describe("Mock data dialog staging (AC-007)", () => {
     // Changes tab shows the staged INSERTs.
     await user.click(screen.getByRole("tab", { name: /changes/i }));
     const changes = screen.getByRole("list", { name: /pending changes/i });
+    // SqlText splits each statement across per-token spans, so match on each row's textContent.
     const inserts = within(changes)
-      .getAllByText(/INSERT INTO/i)
-      .filter((node) => node.textContent?.includes("INSERT INTO"));
+      .getAllByRole("listitem")
+      .filter((node) => /INSERT\s+INTO/i.test(node.textContent ?? ""));
     expect(inserts).toHaveLength(3);
   });
 });
@@ -329,6 +330,10 @@ describe("Mock data dialog on MongoDB (AC-009)", () => {
 
     await user.click(screen.getByRole("tab", { name: /changes/i }));
     const changes = screen.getByRole("list", { name: /pending changes/i });
-    expect(within(changes).getAllByText(/insertOne\(/i).length).toBeGreaterThanOrEqual(2);
+    // SqlText splits the command across per-token spans, so match on each row's textContent.
+    const inserts = within(changes)
+      .getAllByRole("listitem")
+      .filter((node) => /insertOne\(/i.test(node.textContent ?? ""));
+    expect(inserts.length).toBeGreaterThanOrEqual(2);
   });
 });

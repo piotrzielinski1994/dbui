@@ -81,27 +81,27 @@ pub fn log_message(level: String, message: String) {
 // I/O): the impure `Instant` timing + `log::` emission lives at the lib.rs dispatcher, mirroring
 // the launch_log_name pure/impure split above. Elapsed millis are passed in already computed.
 pub fn format_connect_ok(id: &str, engine: &str, tables: usize, ms: u128) -> String {
-    format!("connect id={id} engine={engine} tables={tables} ({ms}ms)")
+    format!("connect connection_id={id} engine={engine} tables={tables} ({ms}ms)")
 }
 
 pub fn format_connect_err(id: &str, engine: &str, ms: u128, error: &str) -> String {
-    format!("connect id={id} engine={engine} failed ({ms}ms): {error}")
+    format!("connect connection_id={id} engine={engine} failed ({ms}ms): {error}")
 }
 
 pub fn format_disconnect(id: &str) -> String {
-    format!("disconnect id={id}")
+    format!("disconnect connection_id={id}")
 }
 
 pub fn format_query_ok(kind: &str, id: &str, statements: usize, rows: usize, ms: u128) -> String {
-    format!("query kind={kind} id={id} statements={statements} rows={rows} ({ms}ms)")
+    format!("query kind={kind} connection_id={id} statements={statements} rows={rows} ({ms}ms)")
 }
 
 pub fn format_query_err(kind: &str, id: &str, ms: u128, error: &str) -> String {
-    format!("query kind={kind} id={id} failed ({ms}ms): {error}")
+    format!("query kind={kind} connection_id={id} failed ({ms}ms): {error}")
 }
 
 pub fn format_mutations(id: &str, table: &str, affected: u64, ms: u128) -> String {
-    format!("mutations id={id} table={table} affected={affected} ({ms}ms)")
+    format!("mutations connection_id={id} table={table} affected={affected} ({ms}ms)")
 }
 
 // A cancelled connect/query rejects with this sentinel (db::CANCEL_SENTINEL). The dispatcher uses
@@ -122,7 +122,7 @@ mod tests {
     fn should_format_connect_ok_line_with_id_engine_tables_and_ms() {
         assert_eq!(
             format_connect_ok("db1", "postgres", 12, 34),
-            "connect id=db1 engine=postgres tables=12 (34ms)"
+            "connect connection_id=db1 engine=postgres tables=12 (34ms)"
         );
     }
 
@@ -131,14 +131,14 @@ mod tests {
     fn should_format_connect_err_line_with_id_engine_ms_and_error() {
         assert_eq!(
             format_connect_err("db1", "mysql", 40, "connection refused"),
-            "connect id=db1 engine=mysql failed (40ms): connection refused"
+            "connect connection_id=db1 engine=mysql failed (40ms): connection refused"
         );
     }
 
     // behavior: disconnect line reports only the connection id
     #[test]
     fn should_format_disconnect_line_with_id() {
-        assert_eq!(format_disconnect("db1"), "disconnect id=db1");
+        assert_eq!(format_disconnect("db1"), "disconnect connection_id=db1");
     }
 
     // behavior: query-ok line reports kind, id, statement count, summed rows and ms
@@ -146,7 +146,7 @@ mod tests {
     fn should_format_query_ok_line_with_kind_id_statements_rows_and_ms() {
         assert_eq!(
             format_query_ok("sql", "db1", 3, 150, 42),
-            "query kind=sql id=db1 statements=3 rows=150 (42ms)"
+            "query kind=sql connection_id=db1 statements=3 rows=150 (42ms)"
         );
     }
 
@@ -155,7 +155,7 @@ mod tests {
     fn should_format_query_err_line_with_kind_id_ms_and_error() {
         assert_eq!(
             format_query_err("mongo", "db1", 5, "bad filter"),
-            "query kind=mongo id=db1 failed (5ms): bad filter"
+            "query kind=mongo connection_id=db1 failed (5ms): bad filter"
         );
     }
 
@@ -164,7 +164,7 @@ mod tests {
     fn should_format_mutations_line_with_id_table_affected_and_ms() {
         assert_eq!(
             format_mutations("db1", "public.users", 4, 7),
-            "mutations id=db1 table=public.users affected=4 (7ms)"
+            "mutations connection_id=db1 table=public.users affected=4 (7ms)"
         );
     }
 

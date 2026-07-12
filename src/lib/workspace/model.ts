@@ -153,6 +153,10 @@ type DatabaseNodeBase = {
   // When true, every write path to this database is blocked at the frontend boundary (table
   // mutations + write-shaped SQL) - a prod safety cue paired with accentColor. Default false.
   readOnly: boolean;
+  // When true, this database runs in manual-commit mode (auto-commit OFF): the first write opens a
+  // transaction on a pinned connection, reads see the uncommitted changes, and a Commit/Rollback
+  // control finishes it. SQL engines only (MongoDB has no manual-commit). Default false.
+  manualCommit: boolean;
   tables: TableNode[];
   views: ViewObject[];
   sql: string;

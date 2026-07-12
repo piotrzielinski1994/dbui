@@ -168,3 +168,22 @@ export function executeMongo(
 export function cancelConnect(connectionId: string): Promise<void> {
   return cancelQuery(`connect:${connectionId}`);
 }
+
+// Manual-commit transaction control (F12), SQL engines only. `beginTransaction` opens a transaction
+// on the first write (idempotent - a no-op if one is already open); `commit`/`rollback` finish it;
+// `transactionState` reports whether one is open (drives the Commit/Rollback toolbar).
+export function beginTransaction(connectionId: string): Promise<void> {
+  return invoke<void>("begin_transaction", { connectionId });
+}
+
+export function commitTransaction(connectionId: string): Promise<void> {
+  return invoke<void>("commit_transaction", { connectionId });
+}
+
+export function rollbackTransaction(connectionId: string): Promise<void> {
+  return invoke<void>("rollback_transaction", { connectionId });
+}
+
+export function transactionState(connectionId: string): Promise<boolean> {
+  return invoke<boolean>("transaction_state", { connectionId });
+}

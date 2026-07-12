@@ -46,6 +46,7 @@ const tree: TreeNode[] = [
     kind: "database",
     accentColor: null,
     readOnly: false,
+    manualCommit: false,
     id: "db-ppp",
     name: "ppp",
     engine: "postgres",
@@ -163,8 +164,12 @@ describe("revisiting a table tab", () => {
 
     await user.click(screen.getByRole("tab", { name: /history/i }));
     const history = screen.getByRole("list", { name: /query history/i });
-    expect(
-      within(history).getAllByText(/SELECT \* FROM "product" LIMIT 200/),
-    ).toHaveLength(1);
+    // SqlText splits the statement across per-token spans, so match on each entry's textContent.
+    const matching = within(history)
+      .getAllByRole("listitem")
+      .filter((node) =>
+        /SELECT \* FROM "product" LIMIT 200/.test(node.textContent ?? ""),
+      );
+    expect(matching).toHaveLength(1);
   });
 });
