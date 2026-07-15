@@ -14,7 +14,8 @@ export type PaletteCommandId =
   | "toggle-console"
   | "toggle-theme"
   | "toggle-json-view"
-  | "toggle-structure-view";
+  | "toggle-structure-view"
+  | "open-find";
 
 export type PaletteState = {
   openTabCount: number;
@@ -146,5 +147,12 @@ export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
     group: "View",
     actionId: "toggle-structure-view",
     when: (state) => state.isTableActive,
+  },
+  {
+    id: "open-find",
+    name: "Find",
+    group: "View",
+    actionId: "open-find",
+    when: () => true,
   },
 ];

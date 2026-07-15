@@ -32,6 +32,33 @@ type CommandPaletteProps = {
   onNewFolder: () => void;
 };
 
+// Re-fire the open-find binding at whatever surface holds focus once the palette has closed. Find
+// has no global toggle - the grid (window listener) and the editors (CM keymap) each own their own
+// Cmd+F, so the palette just replays the keystroke to the restored-focus element.
+function triggerFind(binding: string | undefined) {
+  if (!binding) {
+    return;
+  }
+  const parts = binding.split("+");
+  const key = parts[parts.length - 1];
+  const mods = new Set(parts.slice(0, -1).map((m) => m.toLowerCase()));
+  const wantsMod = mods.has("mod") || mods.has("meta") || mods.has("ctrl");
+  setTimeout(() => {
+    const target = document.activeElement ?? document.body;
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: key.length === 1 ? key.toLowerCase() : key,
+        metaKey: wantsMod,
+        ctrlKey: wantsMod,
+        shiftKey: mods.has("shift"),
+        altKey: mods.has("alt") || mods.has("option"),
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, 0);
+}
+
 export function CommandPalette({
   open,
   onOpenChange,
@@ -98,6 +125,7 @@ export function CommandPalette({
     "toggle-theme": toggleTheme,
     "toggle-json-view": toggleJsonView,
     "toggle-structure-view": toggleStructureView,
+    "open-find": () => triggerFind(effective["open-find"][0]),
   };
 
   const shortcuts =

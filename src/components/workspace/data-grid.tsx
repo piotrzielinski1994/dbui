@@ -27,6 +27,8 @@ import { isEditableTarget } from "@/lib/workspace/is-editable-target";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 import type { ShortcutOverrides } from "@/lib/shortcuts/registry";
+import { FindBar } from "@/components/workspace/find-bar";
+import { findMatches } from "@/lib/workspace/grid-find";
 import type { RowSelectMode } from "@/lib/workspace/row-select";
 import {
   foreignKeyForColumn,
@@ -220,8 +222,74 @@ function DataGridImpl({
     rowIndex: number;
     column: string;
   } | null>(null);
+  // The in-grid find bar (null = closed). Cmd+F opens it when the grid holds focus; the query is
+  // matched against every cell (case-insensitive) and the active match's cell is highlighted +
+  // scrolled into view. It never filters - all rows stay rendered (design.md non-destructive).
+  const [find, setFind] = useState<{ query: string; activeIndex: number } | null>(
+    null,
+  );
   const containerRef = useRef<HTMLDivElement>(null);
+  const activeCellRef = useRef<HTMLTableCellElement>(null);
   __dataGridRenderCount.value += 1;
+
+  const findQuery = find?.query ?? null;
+  const matches = useMemo(
+    () => (findQuery !== null ? findMatches(columns, rows, findQuery) : []),
+    [findQuery, columns, rows],
+  );
+  const matchTotal = matches.length;
+  const activeMatchIndex =
+    find && matchTotal > 0 ? Math.min(find.activeIndex, matchTotal - 1) : 0;
+  const activeMatch = matchTotal > 0 ? matches[activeMatchIndex] : null;
+  const matchKeys = useMemo(
+    () => new Set(matches.map((m) => `${m.rowIndex}:${m.columnId}`)),
+    [matches],
+  );
+
+  // Cmd+F (the rebindable open-find binding) opens the find bar - but only when focus is inside this
+  // grid (mirrors the delete-rows focus guard), so it never hijacks a Cmd+F meant for an editor.
+  useEffect(() => {
+    const openBinding = resolveShortcuts(shortcuts)["open-find"];
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchesAny(event, openBinding)) {
+        return;
+      }
+      if (!containerRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      event.preventDefault();
+      setFind((current) => current ?? { query: "", activeIndex: 0 });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcuts]);
+
+  // Scroll the active match's cell into view as the query/active index changes.
+  useEffect(() => {
+    activeCellRef.current?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeMatchIndex, findQuery]);
+
+  const stepMatch = (delta: number) => {
+    if (matchTotal === 0) {
+      return;
+    }
+    setFind((current) => {
+      if (!current) {
+        return current;
+      }
+      const base = Math.min(current.activeIndex, matchTotal - 1);
+      const next = (((base + delta) % matchTotal) + matchTotal) % matchTotal;
+      return { ...current, activeIndex: next };
+    });
+  };
+
+  const closeFind = () => {
+    setFind(null);
+    containerRef.current?.focus();
+  };
 
   // The delete-rows binding deletes the current multi-selection, but only when the grid (not a cell
   // input or another surface) has focus, and only if bulk delete is wired (editable table card).
@@ -280,6 +348,24 @@ function DataGridImpl({
 
   return (
     <div ref={containerRef} tabIndex={-1} className="outline-none">
+      {find ? (
+        <div className="sticky top-0 z-20">
+          <FindBar
+            query={find.query}
+            onQueryChange={(query) =>
+              setFind((current) =>
+                current ? { query, activeIndex: 0 } : current,
+              )
+            }
+            activeIndex={matchTotal > 0 ? activeMatchIndex + 1 : 0}
+            total={matchTotal}
+            onNext={() => stepMatch(1)}
+            onPrev={() => stepMatch(-1)}
+            onClose={closeFind}
+            onSubmit={(backwards) => stepMatch(backwards ? -1 : 1)}
+          />
+        </div>
+      ) : null}
       <table
         className="w-full border-collapse text-left text-sm"
         style={{ minWidth: grid.getTotalSize() }}
@@ -389,9 +475,15 @@ function DataGridImpl({
                     editing.column === column;
                   const dirtyValue = editValueAt(row.index, column);
                   const isDirty = isDirtyAt(row.index, column);
+                  const isMatch = matchKeys.has(`${row.index}:${column}`);
+                  const isActiveMatch =
+                    activeMatch !== null &&
+                    activeMatch.rowIndex === row.index &&
+                    activeMatch.columnId === column;
                   return (
                     <td
                       key={cell.id}
+                      ref={isActiveMatch ? activeCellRef : undefined}
                       style={{ width: cell.column.getSize() }}
                       onDoubleClick={() => {
                         if (editable && !isDeleted) {
@@ -401,6 +493,8 @@ function DataGridImpl({
                       className={cn(
                         "overflow-hidden border-r px-0 py-0 font-mono last:border-r-0",
                         isDirty && "bg-amber-500/15",
+                        isMatch && "bg-primary/15",
+                        isActiveMatch && "bg-primary/40",
                       )}
                     >
                       {isEditing ? (

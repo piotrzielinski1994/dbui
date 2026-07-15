@@ -52,6 +52,7 @@ import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
+import { editorFind } from "@/components/workspace/editor-find";
 import type { DbEngine, TableSchema, Variable } from "@/lib/workspace/model";
 
 const dialects = {
@@ -537,6 +538,8 @@ export function SqlEditor({
     : (toCodeMirrorKey(effectiveShortcuts["run-query"][0]) ?? "Mod-Enter");
   const saveKey =
     toCodeMirrorKey(effectiveShortcuts["save-script"][0]) ?? "Mod-s";
+  const findKey =
+    toCodeMirrorKey(effectiveShortcuts["open-find"][0]) ?? "Mod-f";
 
   // A stable key for the collection list so a same-content array doesn't rebuild the language; a
   // real collection change does. Kept as a simple expression for the deps lint.
@@ -601,6 +604,9 @@ export function SqlEditor({
             ];
           })()),
       ...(singleLine ? [EditorState.transactionFilter.of(blockNewlines)] : []),
+      // In-app find (Cmd+F): dbui-styled CM search panel. Full editor only - the single-line filter
+      // row has nothing to search through.
+      ...(singleLine ? [] : [editorFind(findKey)]),
       Prec.highest(
         keymap.of([
           {
@@ -642,6 +648,7 @@ export function SqlEditor({
     colorsKey,
     runKey,
     saveKey,
+    findKey,
   ]);
 
   return (

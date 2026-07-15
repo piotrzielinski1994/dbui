@@ -22,6 +22,7 @@ import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
+import { editorFind } from "@/components/workspace/editor-find";
 
 // The injected `db` read methods per engine (mirrors the worker's `db` stub + the ScriptHost's
 // handleRpc). SQL: query/tables/schema; Mongo: find/aggregate/collections/schema.
@@ -130,6 +131,8 @@ export function JsEditor({
     toCodeMirrorKey(effectiveShortcuts["run-query"][0]) ?? "Mod-Enter";
   const saveKey =
     toCodeMirrorKey(effectiveShortcuts["save-script"][0]) ?? "Mod-s";
+  const findKey =
+    toCodeMirrorKey(effectiveShortcuts["open-find"][0]) ?? "Mod-f";
 
   // Stable dep key for the completion inputs (names only) so an equal-content render reuses the
   // language instead of rebuilding it.
@@ -146,6 +149,7 @@ export function JsEditor({
       syntaxHighlighting(classHighlighter),
       makeSqlChrome(editorColors, isDark),
       EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+      editorFind(findKey),
       Prec.highest(
         keymap.of([
           {
@@ -182,6 +186,7 @@ export function JsEditor({
     colorsKey,
     runKey,
     saveKey,
+    findKey,
   ]);
 
   return (

@@ -13,6 +13,11 @@ import {
 import { useThemeOptional } from "@/lib/theme/theme-context";
 import { applyDefaults } from "@/lib/theme/overrides";
 import { DEFAULT_THEME_COLORS } from "@/lib/theme/theme-defaults";
+import { useSettingsOptional } from "@/lib/settings/settings-context";
+import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
+import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
+import { editorFind } from "@/components/workspace/editor-find";
 import {
   parseJsonRows,
   rowsToJson,
@@ -81,6 +86,11 @@ export function JsonView({ columns, rows, onSave }: JsonViewProps) {
   const editorColors = effectiveColors[effectiveMode].editor as EditorColors;
   const colorsKey = `${effectiveMode}:${JSON.stringify(editorColors)}`;
 
+  const shortcuts =
+    useSettingsOptional()?.settings.shortcuts ?? DEFAULT_SETTINGS.shortcuts;
+  const findKey =
+    toCodeMirrorKey(resolveShortcuts(shortcuts)["open-find"][0]) ?? "Mod-f";
+
   const extensions = useMemo<Extension[]>(
     () => [
       jsonLanguage(),
@@ -88,10 +98,11 @@ export function JsonView({ columns, rows, onSave }: JsonViewProps) {
       syntaxHighlighting(classHighlighter),
       makeSqlChrome(editorColors, isDark),
       EditorView.contentAttributes.of({ "aria-label": "Rows as JSON" }),
+      editorFind(findKey),
     ],
     // editorColors/isDark derive from colorsKey; depending on the key is correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colorsKey],
+    [colorsKey, findKey],
   );
 
   return (

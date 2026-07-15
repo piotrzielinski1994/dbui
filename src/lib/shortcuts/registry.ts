@@ -18,6 +18,7 @@ export type ShortcutActionId =
   | "toggle-record-view"
   | "toggle-json-view"
   | "toggle-structure-view"
+  | "open-find"
   | "refresh-table"
   | "delete-rows"
   | "delete-nodes"
@@ -169,6 +170,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     description:
       "Show the table's columns, indexes, foreign keys, and constraints.",
     defaultHotkey: "Mod+Shift+I",
+    scope: "grid",
+  },
+  {
+    id: "open-find",
+    name: "Find",
+    description: "Open the in-app find bar for the focused grid or editor.",
+    defaultHotkey: "Mod+F",
     scope: "grid",
   },
   {
