@@ -11,6 +11,7 @@ const EXPECTED_BY_SCOPE: Record<ShortcutScope, ShortcutActionId[]> = {
   global: [
     "open-command-palette",
     "open-quick-open",
+    "open-workspace",
     "new-database",
     "new-folder",
     "toggle-sidebar",

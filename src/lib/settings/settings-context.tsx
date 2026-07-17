@@ -47,6 +47,9 @@ type SettingsContextValue = {
   resetShortcut: (id: ShortcutActionId) => void;
   saveWindowFullscreen: (fullscreen: boolean) => void;
   saveRowLimit: (rowLimit: number) => void;
+  // Persist the user-picked workspace folder path. Excluded from the saveChrome slice (like theme/
+  // shortcuts) so a chrome toggle never wipes it - saveChrome merges it from current settings.
+  saveWorkspacePath: (path: string) => void;
 };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -204,6 +207,11 @@ export function SettingsProvider({ store, children }: SettingsProviderProps) {
     [update],
   );
 
+  const saveWorkspacePath = useCallback(
+    (path: string) => update((base) => ({ ...base, workspacePath: path })),
+    [update],
+  );
+
   const value = useMemo<SettingsContextValue | null>(
     () =>
       settings === null
@@ -220,6 +228,7 @@ export function SettingsProvider({ store, children }: SettingsProviderProps) {
             resetShortcut,
             saveWindowFullscreen,
             saveRowLimit,
+            saveWorkspacePath,
           },
     [
       settings,
@@ -233,6 +242,7 @@ export function SettingsProvider({ store, children }: SettingsProviderProps) {
       resetShortcut,
       saveWindowFullscreen,
       saveRowLimit,
+      saveWorkspacePath,
     ],
   );
 

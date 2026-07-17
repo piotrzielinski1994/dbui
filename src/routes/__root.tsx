@@ -4,8 +4,6 @@ import { isTauri } from "@tauri-apps/api/core";
 import { SettingsProvider } from "@/lib/settings/settings-context";
 import { createTauriSettingsStore } from "@/lib/settings/tauri-store";
 import { ThemeProvider } from "@/lib/theme/theme-context";
-import { WorkspaceStoreProvider } from "@/lib/workspace/workspace-store-context";
-import { createTauriWorkspaceStore } from "@/lib/workspace/tauri-store";
 import {
   createNoopWindowController,
   createWindowController,
@@ -21,16 +19,13 @@ function createWindowControllerForEnv() {
 
 function RootLayout() {
   const [settingsStore] = useState(createTauriSettingsStore);
-  const [workspaceStore] = useState(createTauriWorkspaceStore);
   const [windowController] = useState(createWindowControllerForEnv);
 
   return (
     <SettingsProvider store={settingsStore}>
       <WindowFullscreenSync controller={windowController} />
       <ThemeProvider>
-        <WorkspaceStoreProvider store={workspaceStore}>
-          <Outlet />
-        </WorkspaceStoreProvider>
+        <Outlet />
       </ThemeProvider>
     </SettingsProvider>
   );

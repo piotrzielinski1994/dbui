@@ -1,10 +1,10 @@
 import type {
+  DatabaseNode,
   DbEngine,
   NetworkEngine,
   QueryResult,
   SavedJsScript,
   SavedScript,
-  TreeNode,
   Variable,
 } from "@/lib/workspace/model";
 
@@ -67,30 +67,6 @@ export type PersistedDatabase =
   | PersistedSqliteDatabase
   | PersistedMongoDatabase;
 
-export type PersistedFolder = {
-  kind: "folder";
-  id: string;
-  name: string;
-  children: PersistedNode[];
-};
-
-export type PersistedNode = PersistedFolder | PersistedDatabase;
-
-export type PersistedWorkspace = {
-  version: 1;
-  tree: PersistedNode[];
-};
-
-export type WorkspaceStore = {
-  load: () => Promise<PersistedWorkspace>;
-  save: (workspace: PersistedWorkspace) => Promise<void>;
-};
-
-export const DEFAULT_WORKSPACE: PersistedWorkspace = {
-  version: 1,
-  tree: [],
-};
-
 const NETWORK_ENGINES = new Set<DbEngine>(["postgres", "mysql", "sqlserver"]);
 
 const EMPTY_RESULT: QueryResult = {
@@ -120,7 +96,7 @@ function mergeAccentColor(value: unknown): { accentColor: string } | undefined {
 
 // A persisted readOnly is kept only when it is the boolean `true`; a `false`, non-boolean, or
 // missing value is dropped so the database loads writable (mirrors mergeAccentColor omitting the
-// default). Guards a hand-edited/garbage workspace.json from crashing hydrate.
+// default). Guards a hand-edited/garbage db.json.
 function mergeReadOnly(value: unknown): { readOnly: true } | undefined {
   return value === true ? { readOnly: true } : undefined;
 }
@@ -178,7 +154,7 @@ function mergeSavedJsScripts(
 
 // Keeps only the `{ name, value }` string records; drops anything else. Returns the field only when
 // the cleaned list is non-empty, so an empty list is omitted from the persisted shape (mirrors
-// mergeSavedScripts). Guards a hand-edited/garbage workspace.json.
+// mergeSavedScripts). Guards a hand-edited/garbage db.json.
 function mergeVariables(
   value: unknown,
 ): { variables: Variable[] } | undefined {
@@ -194,7 +170,13 @@ function mergeVariables(
   return variables.length > 0 ? { variables } : undefined;
 }
 
-function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null {
+// Validate a parsed db.json record into a PersistedDatabase (or null when it is not a valid database
+// shape). Tolerant: garbage optional fields are dropped, required fields missing -> null, never
+// throws. This is the single per-database field codec both the disk reader and any importer share.
+export function mergeDatabaseFile(value: unknown): PersistedDatabase | null {
+  if (!isRecord(value)) {
+    return null;
+  }
   const { id, name, engine } = value;
   if (typeof id !== "string" || typeof name !== "string") {
     return null;
@@ -287,58 +269,9 @@ function mergeDatabase(value: Record<string, unknown>): PersistedDatabase | null
   };
 }
 
-function mergeFolder(value: Record<string, unknown>): PersistedFolder | null {
-  const { id, name, children } = value;
-  if (typeof id !== "string" || typeof name !== "string") {
-    return null;
-  }
-  return {
-    kind: "folder",
-    id,
-    name,
-    children: Array.isArray(children) ? mergeNodes(children) : [],
-  };
-}
-
-function mergeNode(value: unknown): PersistedNode | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.kind === "database") {
-    return mergeDatabase(value);
-  }
-  if (value.kind === "folder") {
-    return mergeFolder(value);
-  }
-  return null;
-}
-
-function mergeNodes(values: unknown[]): PersistedNode[] {
-  return values
-    .map(mergeNode)
-    .filter((node): node is PersistedNode => node !== null);
-}
-
-export function mergeWorkspace(partial: unknown): PersistedWorkspace {
-  if (!isRecord(partial) || !Array.isArray(partial.tree)) {
-    return DEFAULT_WORKSPACE;
-  }
-  return { version: 1, tree: mergeNodes(partial.tree) };
-}
-
-export function hydrate(tree: PersistedNode[]): TreeNode[] {
-  return tree.map(hydrateNode);
-}
-
-function hydrateNode(node: PersistedNode): TreeNode {
-  if (node.kind === "folder") {
-    return {
-      kind: "folder",
-      id: node.id,
-      name: node.name,
-      children: node.children.map(hydrateNode),
-    };
-  }
+// Build a runtime DatabaseNode from a persisted record: missing optional flags default off,
+// runtime-only fields (tables/views/sql/result) start empty (a live connect fills them).
+export function hydrateDatabase(node: PersistedDatabase): DatabaseNode {
   const runtime = {
     kind: "database" as const,
     id: node.id,
@@ -381,24 +314,9 @@ function hydrateNode(node: PersistedNode): TreeNode {
   };
 }
 
-export function dehydrate(tree: TreeNode[]): PersistedWorkspace {
-  return { version: 1, tree: tree.flatMap(dehydrateNode) };
-}
-
-function dehydrateNode(node: TreeNode): PersistedNode[] {
-  if (node.kind === "table") {
-    return [];
-  }
-  if (node.kind === "folder") {
-    return [
-      {
-        kind: "folder",
-        id: node.id,
-        name: node.name,
-        children: node.children.flatMap(dehydrateNode),
-      },
-    ];
-  }
+// Serialize a runtime DatabaseNode to its persisted shape: default flags + empty collections are
+// OMITTED for a minimal diff, and the runtime-only fields (tables/views/sql/result) never appear.
+export function dehydrateDatabase(node: DatabaseNode): PersistedDatabase {
   const accent =
     node.accentColor === null ? undefined : { accentColor: node.accentColor };
   const readOnly = node.readOnly ? { readOnly: true as const } : undefined;
@@ -420,57 +338,12 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
   const variables =
     node.variables.length > 0 ? { variables: node.variables } : undefined;
   if (node.engine === "sqlite") {
-    return [
-      {
-        kind: "database",
-        id: node.id,
-        name: node.name,
-        engine: "sqlite",
-        file: node.file,
-        ...accent,
-        ...readOnly,
-        ...manualCommit,
-        ...defaultSchema,
-        ...scripts,
-        ...jsScripts,
-        ...variables,
-      },
-    ];
-  }
-  if (node.engine === "mongodb") {
-    return [
-      {
-        kind: "database",
-        id: node.id,
-        name: node.name,
-        engine: "mongodb",
-        host: node.host,
-        port: node.port,
-        database: node.database,
-        user: node.user,
-        password: node.password,
-        ...(node.uri !== undefined ? { uri: node.uri } : {}),
-        ...accent,
-        ...readOnly,
-        ...manualCommit,
-        ...defaultSchema,
-        ...scripts,
-        ...jsScripts,
-        ...variables,
-      },
-    ];
-  }
-  return [
-    {
+    return {
       kind: "database",
       id: node.id,
       name: node.name,
-      engine: node.engine,
-      host: node.host,
-      port: node.port,
-      database: node.database,
-      user: node.user,
-      password: node.password,
+      engine: "sqlite",
+      file: node.file,
       ...accent,
       ...readOnly,
       ...manualCommit,
@@ -478,6 +351,45 @@ function dehydrateNode(node: TreeNode): PersistedNode[] {
       ...scripts,
       ...jsScripts,
       ...variables,
-    },
-  ];
+    };
+  }
+  if (node.engine === "mongodb") {
+    return {
+      kind: "database",
+      id: node.id,
+      name: node.name,
+      engine: "mongodb",
+      host: node.host,
+      port: node.port,
+      database: node.database,
+      user: node.user,
+      password: node.password,
+      ...(node.uri !== undefined ? { uri: node.uri } : {}),
+      ...accent,
+      ...readOnly,
+      ...manualCommit,
+      ...defaultSchema,
+      ...scripts,
+      ...jsScripts,
+      ...variables,
+    };
+  }
+  return {
+    kind: "database",
+    id: node.id,
+    name: node.name,
+    engine: node.engine,
+    host: node.host,
+    port: node.port,
+    database: node.database,
+    user: node.user,
+    password: node.password,
+    ...accent,
+    ...readOnly,
+    ...manualCommit,
+    ...defaultSchema,
+    ...scripts,
+    ...jsScripts,
+    ...variables,
+  };
 }

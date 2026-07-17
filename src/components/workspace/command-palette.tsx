@@ -30,6 +30,7 @@ type CommandPaletteProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNewFolder: () => void;
+  onOpenWorkspace: () => void;
 };
 
 // Re-fire the open-find binding at whatever surface holds focus once the palette has closed. Find
@@ -63,6 +64,7 @@ export function CommandPalette({
   open,
   onOpenChange,
   onNewFolder,
+  onOpenWorkspace,
 }: CommandPaletteProps) {
   const {
     openTabIds,
@@ -110,6 +112,7 @@ export function CommandPalette({
 
   const handlers: Record<PaletteCommandId, () => void> = {
     "quick-open": openQuickOpen,
+    "open-workspace": onOpenWorkspace,
     "new-database": addDatabase,
     "new-folder": onNewFolder,
     "close-tab": closeActiveTab,

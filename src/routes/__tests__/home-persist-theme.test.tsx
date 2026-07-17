@@ -4,19 +4,27 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryWrapper } from "@/test/query-wrapper";
 import { SettingsProvider } from "@/lib/settings/settings-context";
 import { ThemeProvider } from "@/lib/theme/theme-context";
-import { WorkspaceStoreProvider } from "@/lib/workspace/workspace-store-context";
+import { WorkspaceLoader } from "@/components/workspace/workspace-loader";
 import { createInMemorySettingsStore } from "@/lib/settings/in-memory-store";
-import { createInMemoryWorkspaceStore } from "@/lib/workspace/in-memory-store";
+import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
+import { createNoopFolderPicker } from "@/lib/workspace/folder-picker";
+import { serialize } from "@/lib/workspace/disk-format";
 import {
   DEFAULT_SETTINGS,
   type Settings,
   type ThemeColors,
 } from "@/lib/settings/settings";
-import { HomePage } from "@/routes/index";
 
-// Regression: HomePage's onPersist (persistChrome) must FOLD the current theme back into every
-// UI-chrome write, so toggling the sidebar/console doesn't clobber theme.colors to a theme-less
+// Regression: the workspace loader's onPersist (persistChrome) must FOLD the current theme back into
+// every UI-chrome write, so toggling the sidebar/console doesn't clobber theme.colors to a theme-less
 // (default) object. Without the fold, a chrome toggle would drop the user's saved color overrides.
+
+vi.mock("@/lib/tauri", () => ({
+  connectDatabase: vi.fn(() => Promise.resolve({ tables: [], views: [] })),
+  fetchSchema: vi.fn(() => Promise.resolve([])),
+  cancelConnect: vi.fn(),
+  disconnectDatabase: vi.fn(),
+}));
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }), Toaster: () => null }));
 
@@ -48,6 +56,7 @@ describe("HomePage chrome persist preserves theme", () => {
     stubMatchMedia();
     const seeded: Settings = {
       ...DEFAULT_SETTINGS,
+      workspacePath: "/ws/demo",
       theme: { mode: "light", colors },
     };
     const inner = createInMemorySettingsStore(seeded);
@@ -59,15 +68,13 @@ describe("HomePage chrome persist preserves theme", () => {
         return inner.save(s);
       },
     };
-    const workspaceStore = createInMemoryWorkspaceStore();
+    const fs = createInMemoryWorkspaceFs({ "/ws/demo": serialize([], "Demo") });
 
     render(
       <QueryWrapper>
         <SettingsProvider store={settingsStore}>
           <ThemeProvider>
-            <WorkspaceStoreProvider store={workspaceStore}>
-              <HomePage />
-            </WorkspaceStoreProvider>
+            <WorkspaceLoader fs={fs} picker={createNoopFolderPicker()} />
           </ThemeProvider>
         </SettingsProvider>
       </QueryWrapper>,

@@ -26,26 +26,28 @@ function renderApp(initialPath = "/") {
 }
 
 describe("workspace routing", () => {
-  // TC-001, AC-002 — behavior
-  it("should render the workspace sidebar tree at the home route", async () => {
+  // AC-001 — behavior (first run with no workspacePath shows the Open-workspace prompt, no tree)
+  it("should render the open-workspace prompt at the home route with no workspace open", async () => {
     renderApp("/");
     expect(
-      await screen.findByRole("tree", { name: /navigator/i }),
+      await screen.findByRole("button", { name: /open workspace folder/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("tree", { name: /navigator/i })).not.toBeInTheDocument();
   });
 
-  // TC-001, AC-013 — behavior
-  it("should render the console region at the home route", async () => {
+  // AC-001 — behavior (the console region only mounts inside a loaded workspace, not the empty state)
+  it("should not render the console region before a workspace is open", async () => {
     renderApp("/");
+    await screen.findByRole("button", { name: /open workspace folder/i });
     expect(
-      await screen.findByRole("region", { name: /console/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: /console/i }),
+    ).not.toBeInTheDocument();
   });
 
   // AC-015 — behavior (bootstrap demo nav removed)
   it("should not render the old bootstrap home nav link", async () => {
     renderApp("/");
-    await screen.findByRole("tree", { name: /navigator/i });
+    await screen.findByRole("button", { name: /open workspace folder/i });
     expect(
       screen.queryByRole("link", { name: /^home$/i }),
     ).not.toBeInTheDocument();
@@ -54,7 +56,7 @@ describe("workspace routing", () => {
   // AC-015 — behavior (no command palette dialog)
   it("should not render a command palette dialog", async () => {
     renderApp("/");
-    await screen.findByRole("tree", { name: /navigator/i });
+    await screen.findByRole("button", { name: /open workspace folder/i });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -70,7 +72,7 @@ describe("workspace routing", () => {
   // behavior (no in-UI settings link on the home view)
   it("should not render an in-UI settings link on the home view", async () => {
     renderApp("/");
-    await screen.findByRole("tree", { name: /navigator/i });
+    await screen.findByRole("button", { name: /open workspace folder/i });
     expect(
       screen.queryByRole("link", { name: /^settings$/i }),
     ).not.toBeInTheDocument();

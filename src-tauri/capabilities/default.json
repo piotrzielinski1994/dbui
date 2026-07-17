@@ -8,6 +8,20 @@
     "core:window:allow-set-fullscreen",
     "opener:default",
     "store:default",
-    "dialog:default"
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:allow-read-dir",
+    "fs:allow-read-text-file",
+    "fs:allow-stat",
+    "fs:allow-write-text-file",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/**/.*/**" }
+      ]
+    }
   ]
 }

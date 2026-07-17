@@ -47,8 +47,11 @@ Rust backend tests: `cd src-tauri && cargo test`.
 The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/tauri.conf.json`).
 
 > The home route renders the workspace shell: a sidebar tree of databases grouped under
-> optional folders, loaded from a persisted `workspace.json` (empty on first run - the
-> sidebar shows a "No connection" state until you add a database). Add a database with
+> optional folders, loaded from a user-picked **workspace folder** (a `dbui.workspace.json`
+> manifest + one `<slug>.db.json` per database + `<slug>/folder.json` per folder). On first
+> launch no folder is open - the app shows an "Open workspace folder..." prompt; pick a folder
+> (or press **Cmd/Ctrl+O** / the "Open workspace folder" palette command) and its path persists in
+> `settings.json`. Add a database with
 > **Cmd/Ctrl+N** (or the "New database" palette command): it appears at the tree root and opens
 > on its Settings tab, where you name it and fill the connection. Add a folder with
 > **Cmd/Ctrl+Shift+N** (or "New folder") - a one-field name dialog. Right-click a database or
@@ -72,7 +75,7 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > host/port/database/user/password when non-empty; SQL Server uses the same host/port/database/
 > user/password network fields as Postgres/MySQL, default port 1433), optionally assign an **accent color** (None / Green / Blue / Red presets, a
 > native picker, or any hex) that recolors the whole shell's existing borders while that database
-> is active, as a prod-vs-test cue (persisted per database in `workspace.json`), and press **Connect** to open
+> is active, as a prod-vs-test cue (persisted per database in its `*.db.json`), and press **Connect** to open
 > a real `sqlx` connection (Rust backend) and replace that database's sidebar tables with the
 > live catalog. Status shows as a toast + a coloured
 > dot on the database row. A database lists its tables only after a successful connect
@@ -98,7 +101,7 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > The **+** button (right of the chips) opens a fresh **`untitled`** document immediately (no
 > dialog) - type, then **Cmd/Ctrl+S** to save: an `untitled`'s first save prompts for a name
 > (renaming the tab), a named script saves silently in place. A database with no scripts auto-opens
-> an `untitled`. Saved scripts persist per database in `workspace.json` and a duplicate name is
+> an `untitled`. Saved scripts persist per database in its `*.db.json` and a duplicate name is
 > rejected. The editor|results split flips between side-by-side and stacked via `Cmd/Ctrl+\` (or the
 > "Toggle split layout" palette command).
 > The **Views** tab lists the connected database's real views (queried on connect). The **Script**
@@ -117,8 +120,8 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > "View table structure" palette command) showing its columns, indexes, foreign keys, and
 > constraints (MongoDB: collection indexes only). Right-clicking a SQL table row offers a **Go to
 > `<table>`** item per outbound foreign key with a non-null value, jumping to the referenced row (opens
-> that table's tab, filtered to the referenced key); FK columns are marked `FK` in the grid header. The sidebar tree + its connection configs persist in
-> `workspace.json`; UI/layout state (panel toggles, split orientation, expanded nodes, open
+> that table's tab, filtered to the referenced key); FK columns are marked `FK` in the grid header. The sidebar tree + its connection configs persist as files
+> inside the picked workspace folder (`dbui.workspace.json` + `*.db.json` + `folder.json`); UI/layout state (panel toggles, split orientation, expanded nodes, open
 > tabs, whether the window was fullscreen at exit - restored on next launch, and the default
 > **row limit** a freshly opened table's grid loads per page, set in `/settings`) persists in
 > `settings.json`; the theme **mode** also lives in `settings.json` while the
@@ -202,8 +205,10 @@ src/
                         theme/ (theme-defaults + mode/override helpers + ThemeProvider: .dark class
                         + inline CSS vars + live OS-preference follow),
                         config-schema/ (zod + zod-derived JSON schema for the color editor),
-                        workspace/ (sidebar tree from workspace.json: types +
-                        mergeWorkspace + hydrate/dehydrate, stores, WorkspaceStoreProvider)
+                        workspace/ (sidebar tree from a picked workspace folder: model +
+                        disk-format serialize/deserialize + per-db codec (mergeDatabaseFile/
+                        hydrateDatabase/dehydrateDatabase), WorkspaceFs port + tauri-fs/in-memory-fs,
+                        reconcile, slug, folder-picker)
   index.css             Tailwind v4 + theme tokens
   test/setup.ts         Vitest + Testing Library setup
 src-tauri/              Rust desktop shell: db.rs (Postgres/MySQL/SQLite via sqlx Any), mongo.rs

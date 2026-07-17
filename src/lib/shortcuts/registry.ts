@@ -3,6 +3,7 @@ export type ShortcutScope = "global" | "tab" | "grid" | "tree" | "editor";
 export type ShortcutActionId =
   | "open-command-palette"
   | "open-quick-open"
+  | "open-workspace"
   | "new-database"
   | "new-folder"
   | "toggle-sidebar"
@@ -64,6 +65,13 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     name: "Quick open table",
     description: "Fuzzy-jump to any table, database, or folder by name.",
     defaultHotkey: "Mod+P",
+    scope: "global",
+  },
+  {
+    id: "open-workspace",
+    name: "Open workspace",
+    description: "Pick a workspace folder to load.",
+    defaultHotkey: "Mod+O",
     scope: "global",
   },
   {

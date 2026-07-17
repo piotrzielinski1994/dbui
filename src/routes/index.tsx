@@ -1,15 +1,17 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { createRoute } from "@tanstack/react-router";
 import { isTauri } from "@tauri-apps/api/core";
-import { WorkspaceProvider } from "@/components/workspace/workspace-context";
-import { WorkspaceLayout } from "@/components/workspace/workspace-layout";
-import { useSettings } from "@/lib/settings/settings-context";
-import type { Settings } from "@/lib/settings/settings";
-import { useWorkspaceStore } from "@/lib/workspace/workspace-store-context";
+import { WorkspaceLoader } from "@/components/workspace/workspace-loader";
 import {
   createNoopLogStream,
   createTauriLogStream,
 } from "@/lib/logging/log-stream";
+import { createTauriWorkspaceFs } from "@/lib/workspace/tauri-fs";
+import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
+import {
+  createNoopFolderPicker,
+  createTauriFolderPicker,
+} from "@/lib/workspace/folder-picker";
 import { rootRoute } from "@/routes/__root";
 
 // Only the real Tauri host forwards backend log records to the webview; the dev-browser + jsdom
@@ -18,39 +20,22 @@ function createLogStreamForEnv() {
   return isTauri() ? createTauriLogStream() : createNoopLogStream();
 }
 
+// The real Tauri host reads/writes the picked workspace folder via plugin-fs + plugin-dialog; the
+// dev-browser + jsdom get an in-memory fs + a noop picker (no webview to drive).
+function createWorkspaceFsForEnv() {
+  return isTauri() ? createTauriWorkspaceFs() : createInMemoryWorkspaceFs({});
+}
+
+function createFolderPickerForEnv() {
+  return isTauri() ? createTauriFolderPicker() : createNoopFolderPicker();
+}
+
 export function HomePage() {
-  const { settings, saveChrome } = useSettings();
-  const { tree, persistTree } = useWorkspaceStore();
   const [logStream] = useState(createLogStreamForEnv);
+  const [fs] = useState(createWorkspaceFsForEnv);
+  const [picker] = useState(createFolderPickerForEnv);
 
-  // The workspace persists only the UI-chrome slice of Settings. saveChrome is a WRITE-ONLY store
-  // save (no setSettings), so a sidebar/console toggle never re-renders the settings tree - it
-  // merges over the current theme/shortcuts/windowFullscreen internally. Stable identity
-  // ([saveChrome] only), so it never re-fires the provider's persist effect. (Chrome is only ever
-  // read as the initial seed.)
-  const persistChrome = useCallback(
-    (next: Omit<Settings, "theme" | "shortcuts" | "windowFullscreen" | "rowLimit">) =>
-      saveChrome(next),
-    [saveChrome],
-  );
-
-  return (
-    <WorkspaceProvider
-      tree={tree}
-      logStream={logStream}
-      onTreeChange={persistTree}
-      initialExpandedIds={settings.expandedIds}
-      initialOpenTabIds={settings.openTabIds}
-      initialActiveTabId={settings.activeTabId ?? undefined}
-      initialSidebarHidden={settings.sidebarHidden}
-      initialConsoleHidden={settings.consoleHidden}
-      initialSplitOrientation={settings.splitOrientation}
-      initialLayouts={settings.layouts}
-      onPersist={persistChrome}
-    >
-      <WorkspaceLayout />
-    </WorkspaceProvider>
-  );
+  return <WorkspaceLoader fs={fs} picker={picker} logStream={logStream} />;
 }
 
 export const indexRoute = createRoute({

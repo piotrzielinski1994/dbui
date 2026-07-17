@@ -1,5 +1,6 @@
 export type PaletteCommandId =
   | "quick-open"
+  | "open-workspace"
   | "new-database"
   | "new-folder"
   | "close-tab"
@@ -54,6 +55,13 @@ export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
     name: "Quick open table",
     group: "View",
     actionId: "open-quick-open",
+    when: () => true,
+  },
+  {
+    id: "open-workspace",
+    name: "Open workspace folder",
+    group: "View",
+    actionId: "open-workspace",
     when: () => true,
   },
   {

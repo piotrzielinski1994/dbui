@@ -73,6 +73,9 @@ export type ThemeSettings = {
 
 export type Settings = {
   version: 1;
+  // The absolute path of the user-picked workspace folder (exploded file/folder store). Undefined
+  // until a folder is opened; persisted in settings.json. The workspace tree lives on disk under it.
+  workspacePath?: string;
   sidebarHidden: boolean;
   consoleHidden: boolean;
   splitOrientation: SplitOrientation;
@@ -291,6 +294,11 @@ export function mergeSettings(defaults: Settings, partial: unknown): Settings {
       : null;
   return {
     version: defaults.version,
+    ...(typeof partial.workspacePath === "string"
+      ? { workspacePath: partial.workspacePath }
+      : defaults.workspacePath !== undefined
+        ? { workspacePath: defaults.workspacePath }
+        : {}),
     sidebarHidden:
       typeof partial.sidebarHidden === "boolean"
         ? partial.sidebarHidden

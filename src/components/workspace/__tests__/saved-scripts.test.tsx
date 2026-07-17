@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EditorView } from "@codemirror/view";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ReactNode } from "react";
 
@@ -13,11 +13,8 @@ import {
 } from "@/components/workspace/workspace-context";
 import { SqlTab } from "@/components/workspace/sql-tab";
 import { Content } from "@/components/workspace/content";
-import {
-  WorkspaceStoreProvider,
-  useWorkspaceStore,
-} from "@/lib/workspace/workspace-store-context";
-import { createInMemoryWorkspaceStore } from "@/lib/workspace/in-memory-store";
+import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
+import { deserialize, serialize } from "@/lib/workspace/disk-format";
 import { executeSql } from "@/lib/tauri";
 import { toast } from "sonner";
 import type {
@@ -26,7 +23,35 @@ import type {
   SavedScript,
   TreeNode,
 } from "@/lib/workspace/model";
-import type { WorkspaceStore } from "@/lib/workspace/workspace";
+
+// An fs-backed WorkspaceStore-shaped shim over serialize/deserialize + the in-memory fs, so the
+// saved-scripts persistence integration tests round-trip through the SAME disk-format path the app
+// uses (replaces the removed whole-tree blob store). load() returns { tree }; save serializes to fs.
+const STORE_PATH = "/ws/test";
+
+type TestStore = {
+  load: () => Promise<{ tree: TreeNode[] }>;
+  save: (tree: TreeNode[]) => Promise<void>;
+};
+
+function createTestStore(initialTree: TreeNode[] = []): TestStore {
+  const fs = createInMemoryWorkspaceFs({
+    [STORE_PATH]: serialize(initialTree, "Test"),
+  });
+  return {
+    load: async () => {
+      const read = await fs.readWorkspace(STORE_PATH);
+      if (!read.ok) {
+        return { tree: [] };
+      }
+      const parsed = deserialize(read.files);
+      return { tree: parsed.ok ? parsed.tree : [] };
+    },
+    save: async (tree) => {
+      await fs.writeWorkspace(STORE_PATH, serialize(tree, "Test"));
+    },
+  };
+}
 
 vi.mock("@/lib/tauri", () => ({
   executeSql: vi.fn(),
@@ -87,6 +112,9 @@ function databaseNode(overrides: Partial<DatabaseNode>): DatabaseNode {
     sql: "SELECT 1",
     savedScripts: [],
     savedJsScripts: [],
+    variables: [],
+    manualCommit: false,
+    defaultSchema: null,
     result: {
       status: "success",
       timeMs: 0,
@@ -625,23 +653,12 @@ describe("SqlTab scripts toolbar", () => {
   // AC-014 - behavior: the in-place overwrite actually changes the stored sql (no duplicate chip)
   it("should persist the overwritten sql for the active named script", async () => {
     const user = userEvent.setup();
-    const store = createInMemoryWorkspaceStore({
-      version: 1,
-      tree: [
-        {
-          kind: "database",
-          id: "db-a",
-          name: "a",
-          engine: "postgres",
-          host: "localhost",
-          port: 5432,
-          database: "app",
-          user: "postgres",
-          password: "postgres",
-          savedScripts: [{ name: "asd2", sql: "select old" }],
-        },
-      ],
-    });
+    const store = createTestStore([
+      databaseNode({
+        id: "db-a",
+        savedScripts: [{ name: "asd2", sql: "select old" }],
+      }),
+    ]);
 
     const { container } = render(
       <WorkspaceStoreBridge store={store}>
@@ -759,55 +776,42 @@ function WorkspaceStoreBridge({
   store,
   children,
 }: {
-  store: WorkspaceStore;
+  store: TestStore;
   children: (
     tree: TreeNode[],
     persistTree: (tree: TreeNode[]) => void,
   ) => ReactNode;
 }) {
-  return (
-    <WorkspaceStoreProvider store={store}>
-      <StoreConsumer>{children}</StoreConsumer>
-    </WorkspaceStoreProvider>
-  );
-}
-
-function StoreConsumer({
-  children,
-}: {
-  children: (
-    tree: TreeNode[],
-    persistTree: (tree: TreeNode[]) => void,
-  ) => ReactNode;
-}) {
-  const { tree, persistTree } = useWorkspaceStore();
+  const [tree, setTree] = useState<TreeNode[] | null>(null);
+  useEffect(() => {
+    let isMounted = true;
+    store.load().then((loaded) => {
+      if (isMounted) {
+        setTree(loaded.tree);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [store]);
+  const persistTree = (next: TreeNode[]) => {
+    setTree(next);
+    store.save(next);
+  };
+  if (tree === null) {
+    return null;
+  }
   return <>{children(tree, persistTree)}</>;
 }
 
 describe("SqlTab saved-scripts persistence integration", () => {
-  function persistedDatabase(savedScripts: SavedScript[]) {
-    return {
-      version: 1 as const,
-      tree: [
-        {
-          kind: "database" as const,
-          id: "db-a",
-          name: "a",
-          engine: "postgres" as const,
-          host: "localhost",
-          port: 5432,
-          database: "app",
-          user: "postgres",
-          password: "postgres",
-          ...(savedScripts.length > 0 ? { savedScripts } : {}),
-        },
-      ],
-    };
+  function persistedDatabase(savedScripts: SavedScript[]): TreeNode[] {
+    return [databaseNode({ id: "db-a", savedScripts })];
   }
 
   // A harness that mounts SqlTab behind the real WorkspaceStoreProvider, persisting tree changes to
   // the given in-memory store via onTreeChange (exactly like routes/index.tsx wires it in the app).
-  function StoreHarness({ store }: { store: WorkspaceStore }) {
+  function StoreHarness({ store }: { store: TestStore }) {
     return (
       <WorkspaceStoreBridge store={store}>
         {(tree, persistTree) => (
@@ -830,7 +834,7 @@ describe("SqlTab saved-scripts persistence integration", () => {
   // Flow: empty db auto-creates an untitled doc, the user types + Cmd+S + names it.
   it("should persist a named script to the store and restore it on reload", async () => {
     const user = userEvent.setup();
-    const store = createInMemoryWorkspaceStore(persistedDatabase([]));
+    const store = createTestStore(persistedDatabase([]));
 
     const first = render(<StoreHarness store={store} />);
     await screen.findByRole("tab", { name: "untitled" });
@@ -866,7 +870,7 @@ describe("SqlTab saved-scripts persistence integration", () => {
   // scripts are seeded so deleting one leaves the other (no auto-untitled re-spawn to muddy this).
   it("should persist a deletion so the script does not return on reload", async () => {
     const user = userEvent.setup();
-    const store = createInMemoryWorkspaceStore(
+    const store = createTestStore(
       persistedDatabase([
         { name: "doomed", sql: "SELECT 1" },
         { name: "keep", sql: "SELECT 2" },

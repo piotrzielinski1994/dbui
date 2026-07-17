@@ -28,7 +28,11 @@ import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 import { useConnectionActions } from "@/components/workspace/use-connection";
 import { connectionOf } from "@/lib/workspace/model";
 
-export function WorkspaceLayout() {
+export function WorkspaceLayout({
+  onOpenWorkspace,
+}: {
+  onOpenWorkspace?: () => void;
+}) {
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false);
   const {
@@ -205,6 +209,7 @@ export function WorkspaceLayout() {
         open={isPaletteOpen}
         onOpenChange={setIsPaletteOpen}
         onNewFolder={() => setIsFolderDialogOpen(true)}
+        onOpenWorkspace={() => onOpenWorkspace?.()}
       />
       <TableQuickOpen
         open={isQuickOpenOpen}
