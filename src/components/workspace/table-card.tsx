@@ -23,11 +23,13 @@ import {
   copyRowsToClipboard,
   copySqlToClipboard,
   DataGrid,
+  exportRowsToFile,
   renderCell,
   type Cell,
   type ColumnMeta,
   type CopyFormat,
 } from "@/components/workspace/data-grid";
+import type { ExportFormat } from "@/lib/export-file";
 import {
   applyRowMutations,
   beginTransaction,
@@ -199,6 +201,7 @@ function TableView({
   onEditDocument,
   onCopySql,
   copySqlLabel,
+  exportBase,
   foreignKeys,
   onFollowForeignKey,
   jsonRows,
@@ -221,6 +224,9 @@ function TableView({
   onEditDocument?: (rowIndex: number) => void;
   onCopySql?: (rowIndices: number[]) => void;
   copySqlLabel?: string;
+  // The default filename base for file export (F2): the table name for a live/static table. Absent
+  // => no Export-to-file items (kept parallel to the copy path, which is always present here).
+  exportBase?: string;
   foreignKeys?: ForeignKey[];
   onFollowForeignKey?: (fk: ForeignKey, rowIndex: number) => void;
   // The rows the JSON view shows/diffs (saved rows only - drafts stay in the grid). Defaults to
@@ -326,6 +332,16 @@ function TableView({
     [columns, rows],
   );
 
+  const exportRows = useCallback(
+    (rowIndices: number[], format: ExportFormat) => {
+      const selectedRows = rowIndices
+        .map((index) => rows[index])
+        .filter((row): row is Cell[] => row !== undefined);
+      exportRowsToFile(columns, selectedRows, format, exportBase ?? "results");
+    },
+    [columns, rows, exportBase],
+  );
+
   // The JSON view owns its own scroll + a pinned Save/Discard footer, so it must fill the height
   // directly - NOT inside a ScrollArea (that grows the editor to its full content height and pushes
   // the footer off-screen). The grid/record views keep the ScrollArea, owned here so each view
@@ -372,6 +388,7 @@ function TableView({
         onCloneRow={onCloneRow}
         onEditDocument={onEditDocument}
         onCopyRows={copyRows}
+        onExportRows={exportBase ? exportRows : undefined}
         onCopySql={onCopySql}
         copySqlLabel={copySqlLabel}
         foreignKeys={foreignKeys}
@@ -1214,6 +1231,7 @@ function LiveTable({
             onEditDocument={editable && isMongo ? openDocEditor : undefined}
             onCopySql={copySql}
             copySqlLabel={isMongo ? "Copy insert" : "Copy SQL"}
+            exportBase={tableName}
             foreignKeys={foreignKeys}
             onFollowForeignKey={followForeignKey}
           />

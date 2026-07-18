@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import {
   copyRowsToClipboard,
   DataGrid,
+  exportRowsToFile,
   type Cell,
   type CopyFormat,
 } from "@/components/workspace/data-grid";
+import type { ExportFormat } from "@/lib/export-file";
 import {
   nextRowSelection,
   type RowSelectionState,
@@ -186,6 +188,16 @@ function OutcomeGrid({ outcome }: { outcome: QueryOutcome }) {
     [rows, outcome.columns],
   );
 
+  const exportRows = useCallback(
+    (rowIndices: number[], format: ExportFormat) => {
+      const picked = rowIndices
+        .map((index) => rows[index])
+        .filter((row): row is Cell[] => row !== undefined);
+      exportRowsToFile(outcome.columns, picked, format, "results");
+    },
+    [rows, outcome.columns],
+  );
+
   return (
     <div className="flex h-full flex-col">
       <ScrollArea className="min-h-0 flex-1">
@@ -201,6 +213,7 @@ function OutcomeGrid({ outcome }: { outcome: QueryOutcome }) {
           sort={sort}
           onSortColumn={cycleSort}
           onCopyRows={copyRows}
+          onExportRows={exportRows}
           shortcuts={shortcuts}
         />
       </ScrollArea>

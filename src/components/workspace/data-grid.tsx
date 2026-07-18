@@ -22,6 +22,13 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { toCsv, toJson } from "@/lib/export";
+import {
+  exportFileName,
+  exportFilters,
+  type ExportFormat,
+} from "@/lib/export-file";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { isEditableTarget } from "@/lib/workspace/is-editable-target";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { matchesAny } from "@/lib/shortcuts/match-hotkey";
@@ -149,6 +156,34 @@ export async function copySqlToClipboard(
   await writeToClipboard(text, `Copied ${rowCount} row(s) as SQL`);
 }
 
+// Writes the given columns + rows to a user-picked file as CSV or JSON (F2). Mirrors
+// copyRowsToClipboard but to disk: seed the save dialog with `<base>-<stamp>.<ext>` + a matching
+// filter, then writeTextFile the exact same toCsv/toJson bytes the clipboard copy produces. A
+// cancelled dialog is a no-op; a write failure surfaces a sticky error toast.
+export async function exportRowsToFile(
+  columns: string[],
+  rows: Cell[][],
+  format: ExportFormat,
+  base: string,
+): Promise<void> {
+  const path = await save({
+    defaultPath: exportFileName(base, format, new Date()),
+    filters: exportFilters(format),
+  });
+  if (path === null) {
+    return;
+  }
+  const text = format === "CSV" ? toCsv(columns, rows) : toJson(columns, rows);
+  try {
+    await writeTextFile(path, text);
+    toast.success(`Exported ${rows.length} row(s) to ${path}`);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : String(error), {
+      duration: Infinity,
+    });
+  }
+}
+
 // The single grid shared by the table card and the SQL result pane - they must look
 // identical. Editing is opt-in (editable + the edit callbacks); read-only callers pass
 // editable={false} and no-op handlers. Headers always render so an empty result still
@@ -178,6 +213,7 @@ function DataGridImpl({
   onCloneRow,
   onEditDocument,
   onCopyRows,
+  onExportRows,
   onCopySql,
   copySqlLabel = "Copy SQL",
   foreignKeys,
@@ -210,6 +246,10 @@ function DataGridImpl({
   // Copy the given row indices (the current selection) to the clipboard as CSV/JSON. When present,
   // the row menu offers "Copy CSV"/"Copy JSON" for the selection. Absent => no copy items.
   onCopyRows?: (rowIndices: number[], format: CopyFormat) => void;
+  // Export the given row indices (the current selection) to a file as CSV/JSON (F2). When present,
+  // the row menu offers "Export CSV..."/"Export JSON..." beside the copy items. Absent => no export
+  // items (static/mock path + JS script result grid, which pass no callback).
+  onExportRows?: (rowIndices: number[], format: ExportFormat) => void;
   // Copy the given row indices as engine-aware INSERT statements. When present, the row menu offers a
   // "Copy SQL" item (label overridable via copySqlLabel). Absent => no SQL copy item (SQL result
   // pane / static path, where there is no single target table).
@@ -491,7 +531,7 @@ function DataGridImpl({
                     onDeleteRow ||
                     onDeleteRows,
                 )) ||
-              Boolean(onCopyRows || onCopySql);
+              Boolean(onCopyRows || onExportRows || onCopySql);
             const rowElement = (
               <tr
                 aria-selected={selectedRows.has(row.index)}
@@ -702,6 +742,30 @@ function DataGridImpl({
                                   onSelect={() => onCopyRows(target, "JSON")}
                                 >
                                   {`Copy JSON${suffix}`}
+                                </ContextMenuItem>
+                              </>
+                            );
+                          })()
+                        : null}
+                      {onExportRows
+                        ? (() => {
+                            const target =
+                              selectedRows.has(row.index) && selectedRows.size > 0
+                                ? [...selectedRows]
+                                : [row.index];
+                            const suffix =
+                              target.length > 1 ? ` (${target.length} rows)` : "";
+                            return (
+                              <>
+                                <ContextMenuItem
+                                  onSelect={() => onExportRows(target, "CSV")}
+                                >
+                                  {`Export CSV...${suffix}`}
+                                </ContextMenuItem>
+                                <ContextMenuItem
+                                  onSelect={() => onExportRows(target, "JSON")}
+                                >
+                                  {`Export JSON...${suffix}`}
                                 </ContextMenuItem>
                               </>
                             );
