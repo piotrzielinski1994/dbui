@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { GroupImperativeHandle } from "react-resizable-panels";
 import type {
   PanelGroupKey,
   PanelLayout,
@@ -32,16 +33,10 @@ import {
   moveNodes as moveTreeNodes,
   type MoveTarget,
 } from "@/lib/workspace/move";
-import {
-  flattenSelectable,
-  rangeBetween,
-} from "@/lib/workspace/tree-select";
+import { flattenSelectable, rangeBetween } from "@/lib/workspace/tree-select";
 import { insertNode } from "@/lib/workspace/tree-edit";
 import { parseLogLine, type LogLine } from "@/lib/workspace/log-line";
-import {
-  createNoopLogStream,
-  type LogStream,
-} from "@/lib/logging/log-stream";
+import { createNoopLogStream, type LogStream } from "@/lib/logging/log-stream";
 import {
   EMPTY_NAV,
   pushNavigation,
@@ -143,6 +138,11 @@ type WorkspaceContextValue = {
   toggleSplitOrientation: () => void;
   layouts: Settings["layouts"];
   saveLayout: (group: PanelGroupKey, layout: PanelLayout) => void;
+  registerPanelGroup: (
+    key: PanelGroupKey,
+    handle: GroupImperativeHandle | null,
+  ) => void;
+  getPanelGroup: (key: PanelGroupKey) => GroupImperativeHandle | null;
   toggleExpand: (id: string) => void;
   openNode: (id: string) => void;
   setActiveTab: (id: string) => void;
@@ -181,7 +181,11 @@ type WorkspaceContextValue = {
   updateScript: (databaseId: string, name: string, sql: string) => void;
   // Rename a saved script in place (first save of an `untitled`). Returns false if the new name
   // already exists on that database (caller keeps the dialog/old name).
-  renameScript: (databaseId: string, oldName: string, newName: string) => boolean;
+  renameScript: (
+    databaseId: string,
+    oldName: string,
+    newName: string,
+  ) => boolean;
   deleteScript: (databaseId: string, name: string) => void;
   // Which saved script is the active document per database (the tab the editor is editing). In
   // memory only - resets to the first script on reload.
@@ -214,7 +218,11 @@ type WorkspaceContextValue = {
   // JS saved-script document tabs (F7), mirroring the SQL saveScript/... family but keyed on `code`.
   saveJsScript: (databaseId: string, name: string, code: string) => boolean;
   updateJsScript: (databaseId: string, name: string, code: string) => void;
-  renameJsScript: (databaseId: string, oldName: string, newName: string) => boolean;
+  renameJsScript: (
+    databaseId: string,
+    oldName: string,
+    newName: string,
+  ) => boolean;
   deleteJsScript: (databaseId: string, name: string) => void;
   activeJsScriptByDb: Map<string, string>;
   setActiveJsScript: (databaseId: string, name: string) => void;
@@ -692,7 +700,12 @@ function renameSavedScript(
     if (node.kind === "folder") {
       return {
         ...node,
-        children: renameSavedScript(node.children, databaseId, oldName, newName),
+        children: renameSavedScript(
+          node.children,
+          databaseId,
+          oldName,
+          newName,
+        ),
       };
     }
     if (node.kind === "database" && node.id === databaseId) {
@@ -860,7 +873,12 @@ type WorkspaceProviderProps = {
   initialLayouts?: Settings["layouts"];
   // The workspace persists only the UI-chrome slice of Settings; the theme is owned by the
   // ThemeProvider, so it is not part of this payload (the route folds it back in).
-  onPersist?: (settings: Omit<Settings, "theme" | "shortcuts" | "windowFullscreen" | "rowLimit">) => void;
+  onPersist?: (
+    settings: Omit<
+      Settings,
+      "theme" | "shortcuts" | "windowFullscreen" | "rowLimit"
+    >,
+  ) => void;
   onTreeChange?: (tree: TreeNode[]) => void;
 };
 
@@ -901,9 +919,7 @@ export function WorkspaceProvider({
   const [expandedIds, setExpandedIds] = useState(
     () => new Set(initialExpandedIds),
   );
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   // The shift-click anchor: the row a range extends from. Set by a replace/toggle click, reused by
   // a following range click.
   const [selectAnchorId, setSelectAnchorId] = useState<string | null>(null);
@@ -960,10 +976,10 @@ export function WorkspaceProvider({
   // second time per toggle (the measured lag). Ref + persist keeps the layout durable, zero render.
   const [layoutsSeed] = useState(initialLayouts);
   const layoutsRef = useRef<Settings["layouts"]>(initialLayouts);
-  const [isSidebarVisible, setIsSidebarVisible] = useState(
-    !initialSidebarHidden,
-  );
-  const [isConsoleVisible, setIsConsoleVisible] = useState(!initialConsoleHidden);
+  const [isSidebarVisible, setIsSidebarVisible] =
+    useState(!initialSidebarHidden);
+  const [isConsoleVisible, setIsConsoleVisible] =
+    useState(!initialConsoleHidden);
   const [pendingPanelFocus, setPendingPanelFocus] =
     useState<PanelFocusTarget>(null);
   const [isJsonView, setIsJsonView] = useState(initialJsonView);
@@ -979,7 +995,9 @@ export function WorkspaceProvider({
     (edit: PendingMutation) =>
       setPendingEdits((current) =>
         current.some((existing) => existing.id === edit.id)
-          ? current.map((existing) => (existing.id === edit.id ? edit : existing))
+          ? current.map((existing) =>
+              existing.id === edit.id ? edit : existing,
+            )
           : [...current, edit],
       ),
     [],
@@ -1090,24 +1108,49 @@ export function WorkspaceProvider({
   // defaultLayout seed). It writes the ref and re-persists the full chrome payload, which it reads
   // from persistPayloadRef (kept current by the render below) so this stays a stable useCallback
   // with no reactive deps - a layout write never rebuilds the workspace value.
-  const persistPayloadRef = useRef<Omit<Settings, "theme" | "shortcuts" | "windowFullscreen" | "rowLimit"> | null>(
-    null,
-  );
+  const persistPayloadRef = useRef<Omit<
+    Settings,
+    "theme" | "shortcuts" | "windowFullscreen" | "rowLimit"
+  > | null>(null);
   const onPersistRef = useRef(onPersist);
   useEffect(() => {
     onPersistRef.current = onPersist;
   }, [onPersist]);
-  const saveLayout = useCallback((group: PanelGroupKey, layout: PanelLayout) => {
-    const current = layoutsRef.current[group];
-    if (JSON.stringify(current) === JSON.stringify(layout)) {
-      return;
-    }
-    layoutsRef.current = { ...layoutsRef.current, [group]: layout };
-    const payload = persistPayloadRef.current;
-    if (payload && onPersistRef.current) {
-      onPersistRef.current({ ...payload, layouts: layoutsRef.current });
-    }
-  }, []);
+  const saveLayout = useCallback(
+    (group: PanelGroupKey, layout: PanelLayout) => {
+      const current = layoutsRef.current[group];
+      if (JSON.stringify(current) === JSON.stringify(layout)) {
+        return;
+      }
+      layoutsRef.current = { ...layoutsRef.current, [group]: layout };
+      const payload = persistPayloadRef.current;
+      if (payload && onPersistRef.current) {
+        onPersistRef.current({ ...payload, layouts: layoutsRef.current });
+      }
+    },
+    [],
+  );
+
+  // Imperative handles for the mounted resizable panel groups, keyed by group. A keyboard/palette
+  // resize reads a group's handle to getLayout()/setLayout() it (setLayout fires onLayoutChanged ->
+  // saveLayout, so the resize persists for free). Ref-based: never persisted, never reactive.
+  const panelGroups = useRef<Map<PanelGroupKey, GroupImperativeHandle>>(
+    new Map(),
+  );
+  const registerPanelGroup = useCallback(
+    (key: PanelGroupKey, handle: GroupImperativeHandle | null) => {
+      if (handle) {
+        panelGroups.current.set(key, handle);
+        return;
+      }
+      panelGroups.current.delete(key);
+    },
+    [],
+  );
+  const getPanelGroup = useCallback(
+    (key: PanelGroupKey) => panelGroups.current.get(key) ?? null,
+    [],
+  );
 
   const clearHistory = useCallback(() => setHistory([]), []);
   const addHistoryEntry = useCallback(
@@ -1214,7 +1257,12 @@ export function WorkspaceProvider({
         const id = crypto.randomUUID();
         setTree((current) =>
           parentId
-            ? insertNode(current, parentId, Number.MAX_SAFE_INTEGER, newDatabaseNode(id))
+            ? insertNode(
+                current,
+                parentId,
+                Number.MAX_SAFE_INTEGER,
+                newDatabaseNode(id),
+              )
             : [...current, newDatabaseNode(id)],
         );
         if (parentId) {
@@ -1480,10 +1528,14 @@ export function WorkspaceProvider({
         ),
       layouts: layoutsSeed,
       saveLayout,
+      registerPanelGroup,
+      getPanelGroup,
     };
   }, [
     layoutsSeed,
     saveLayout,
+    registerPanelGroup,
+    getPanelGroup,
     tree,
     consoleLinesState,
     expandedIds,

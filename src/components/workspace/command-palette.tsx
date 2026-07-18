@@ -16,6 +16,7 @@ import {
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
+import { PANEL_RESIZE_STEP } from "@/lib/workspace/panel-resize";
 import {
   CommandDialog,
   CommandEmpty,
@@ -31,6 +32,7 @@ type CommandPaletteProps = {
   onOpenChange: (open: boolean) => void;
   onNewFolder: () => void;
   onOpenWorkspace: () => void;
+  onResizePanel: (deltaPct: number) => void;
 };
 
 // Re-fire the open-find binding at whatever surface holds focus once the palette has closed. Find
@@ -65,6 +67,7 @@ export function CommandPalette({
   onOpenChange,
   onNewFolder,
   onOpenWorkspace,
+  onResizePanel,
 }: CommandPaletteProps) {
   const {
     openTabIds,
@@ -135,6 +138,8 @@ export function CommandPalette({
     "toggle-json-view": toggleJsonView,
     "toggle-structure-view": toggleStructureView,
     "open-find": () => triggerFind(effective["open-find"][0]),
+    "panel-expand": () => onResizePanel(PANEL_RESIZE_STEP),
+    "panel-shrink": () => onResizePanel(-PANEL_RESIZE_STEP),
   };
 
   const shortcuts =

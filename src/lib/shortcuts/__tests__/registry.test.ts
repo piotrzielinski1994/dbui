@@ -20,6 +20,8 @@ const EXPECTED_BY_SCOPE: Record<ShortcutScope, ShortcutActionId[]> = {
     "toggle-split-orientation",
     "nav-back",
     "nav-forward",
+    "panel-expand",
+    "panel-shrink",
   ],
   tab: ["next-tab", "prev-tab", "close-tab", "close-other-tabs"],
   grid: [
@@ -134,5 +136,13 @@ describe("SHORTCUT_ACTIONS registry", () => {
   it("should carry the documented default binding for close other tabs", () => {
     const byId = new Map(SHORTCUT_ACTIONS.map((a) => [a.id, a.defaultHotkey]));
     expect(byId.get("close-other-tabs")).toBe("Mod+Alt+W");
+  });
+
+  // AC-001, TC-001 - behavior: the panel resize actions are global and bound to
+  // Mod+Alt+= (expand) / Mod+Alt+- (shrink).
+  it("should carry the documented default binding for the panel resize actions", () => {
+    const byId = new Map(SHORTCUT_ACTIONS.map((a) => [a.id, a.defaultHotkey]));
+    expect(byId.get("panel-expand")).toBe("Mod+Alt+=");
+    expect(byId.get("panel-shrink")).toBe("Mod+Alt+-");
   });
 });

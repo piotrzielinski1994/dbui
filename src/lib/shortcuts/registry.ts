@@ -8,6 +8,8 @@ export type ShortcutActionId =
   | "new-folder"
   | "toggle-sidebar"
   | "toggle-console"
+  | "panel-expand"
+  | "panel-shrink"
   | "toggle-theme"
   | "toggle-split-orientation"
   | "next-tab"
@@ -100,6 +102,20 @@ export const SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
     name: "Toggle console",
     description: "Show or hide the console panel.",
     defaultHotkey: "Mod+J",
+    scope: "global",
+  },
+  {
+    id: "panel-expand",
+    name: "Expand panel",
+    description: "Grow the focused panel (sidebar or console).",
+    defaultHotkey: "Mod+Alt+=",
+    scope: "global",
+  },
+  {
+    id: "panel-shrink",
+    name: "Shrink panel",
+    description: "Shrink the focused panel (sidebar or console).",
+    defaultHotkey: "Mod+Alt+-",
     scope: "global",
   },
   {

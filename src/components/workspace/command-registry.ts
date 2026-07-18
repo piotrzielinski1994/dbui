@@ -18,7 +18,9 @@ export type PaletteCommandId =
   | "toggle-theme"
   | "toggle-json-view"
   | "toggle-structure-view"
-  | "open-find";
+  | "open-find"
+  | "panel-expand"
+  | "panel-shrink";
 
 export type PaletteState = {
   openTabCount: number;
@@ -131,7 +133,12 @@ export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
     actionId: "close-other-tabs",
     when: hasMultipleTabs,
   },
-  { id: "close-all-tabs", name: "Close all tabs", group: "Tabs", when: hasTabs },
+  {
+    id: "close-all-tabs",
+    name: "Close all tabs",
+    group: "Tabs",
+    when: hasTabs,
+  },
   {
     id: "toggle-sidebar",
     name: "Toggle sidebar",
@@ -179,6 +186,20 @@ export const PALETTE_COMMANDS: readonly PaletteCommandDef[] = [
     name: "Find",
     group: "View",
     actionId: "open-find",
+    when: () => true,
+  },
+  {
+    id: "panel-expand",
+    name: "Expand panel",
+    group: "View",
+    actionId: "panel-expand",
+    when: () => true,
+  },
+  {
+    id: "panel-shrink",
+    name: "Shrink panel",
+    group: "View",
+    actionId: "panel-shrink",
     when: () => true,
   },
 ];

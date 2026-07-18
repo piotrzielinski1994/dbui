@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
+import type { GroupImperativeHandle } from "react-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -15,8 +16,13 @@ import {
 // subtree. A CONSOLE toggle flips useChrome here (adds/removes the console panel) - required - but
 // the memoized <Content/> below still absorbs it, so the table grid never re-renders on either.
 export const Main = memo(function Main() {
-  const { layouts, saveLayout } = useWorkspace();
+  const { layouts, saveLayout, registerPanelGroup } = useWorkspace();
   const { isConsoleVisible } = useChrome();
+  const groupRef = useCallback(
+    (handle: GroupImperativeHandle | null) =>
+      registerPanelGroup("main", handle),
+    [registerPanelGroup],
+  );
 
   // Same reasoning as WorkspaceLayout: the group + content panel are rendered unconditionally with
   // stable keys/order so toggling the console (Cmd+J) only adds/removes the console panel and never
@@ -25,10 +31,16 @@ export const Main = memo(function Main() {
     <ResizablePanelGroup
       orientation="vertical"
       className="h-full"
+      groupRef={groupRef}
       defaultLayout={layouts.main}
       onLayoutChanged={(layout) => saveLayout("main", layout)}
     >
-      <ResizablePanel key="content" id="content" defaultSize="75%" minSize="30%">
+      <ResizablePanel
+        key="content"
+        id="content"
+        defaultSize="75%"
+        minSize="30%"
+      >
         <Content />
       </ResizablePanel>
       {isConsoleVisible

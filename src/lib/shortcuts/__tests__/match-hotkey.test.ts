@@ -63,6 +63,45 @@ describe("matchesHotkey", () => {
   it("should not match an invalid hotkey string", () => {
     expect(matchesHotkey(ev({ key: "k", metaKey: true }), "###")).toBe(false);
   });
+
+  // macOS Option composes punctuation into a symbol: Option+= emits key "≠" and
+  // Option+- emits "–", so a key-only match would miss the binding. Match the
+  // physical event.code (Equal/Minus) so Mod+Alt+= / Mod+Alt+- still fire.
+  it("should match Mod+Alt+= if key is the Option-composed symbol but code is Equal", () => {
+    expect(
+      matchesHotkey(
+        ev({ key: "≠", code: "Equal", metaKey: true, altKey: true }),
+        "Mod+Alt+=",
+      ),
+    ).toBe(true);
+  });
+
+  it("should match Mod+Alt+- if key is the Option-composed symbol but code is Minus", () => {
+    expect(
+      matchesHotkey(
+        ev({ key: "–", code: "Minus", metaKey: true, altKey: true }),
+        "Mod+Alt+-",
+      ),
+    ).toBe(true);
+  });
+
+  // The plain event.key path still works when no layout composition happened
+  // (non-Mac, or the literal key jsdom/userEvent fires).
+  it("should match Mod+Alt+= via the literal key when no composition happened", () => {
+    expect(
+      matchesHotkey(
+        ev({ key: "=", code: "Equal", metaKey: true, altKey: true }),
+        "Mod+Alt+=",
+      ),
+    ).toBe(true);
+  });
+
+  // code only rescues the match; the modifiers must still line up.
+  it("should not match Mod+Alt+= via code if alt is not held", () => {
+    expect(
+      matchesHotkey(ev({ key: "≠", code: "Equal", metaKey: true }), "Mod+Alt+="),
+    ).toBe(false);
+  });
 });
 
 describe("matchesAny", () => {

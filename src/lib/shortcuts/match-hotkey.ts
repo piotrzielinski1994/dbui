@@ -2,10 +2,22 @@ import { safeNormalize } from "@/lib/shortcuts/resolve";
 
 type ModifierEvent = {
   key: string;
+  code?: string;
   metaKey: boolean;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+};
+
+// Physical `event.code` for punctuation hotkey chars, so a binding still matches
+// when a keyboard layout (e.g. macOS Option composing `=`->`≠`, `-`->`–`)
+// rewrites `event.key` into a symbol. Only chars actually bound need an entry.
+const KEY_CODES: Record<string, string> = {
+  "=": "Equal",
+  "-": "Minus",
+  "[": "BracketLeft",
+  "]": "BracketRight",
+  "\\": "Backslash",
 };
 
 // Matches a keyboard event against a registry hotkey string. "Mod" matches EITHER
@@ -28,7 +40,7 @@ export function matchesHotkey(event: ModifierEvent, hotkey: string): boolean {
 
   const keyMatches = /^[a-zA-Z]$/.test(key)
     ? event.key.toLowerCase() === key.toLowerCase()
-    : event.key === key;
+    : event.key === key || (!!KEY_CODES[key] && event.code === KEY_CODES[key]);
   if (!keyMatches) {
     return false;
   }
