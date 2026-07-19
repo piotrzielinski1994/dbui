@@ -8,7 +8,7 @@ sidebar drag-and-drop.
 
 ## Prerequisites
 
-- **Node.js** - version pinned in [.nvmrc](.nvmrc). Run `nvm use` before any npm command.
+- **Node.js** - version pinned in [mise.toml](mise.toml). With [mise](https://mise.jdx.dev) installed, `mise install` provisions it (and it auto-activates on `cd` once `mise activate` is set up).
 - **Rust** stable toolchain (`rustc`, `cargo`).
 - **Tauri OS prerequisites** - platform-specific system libraries (WebKitGTK on Linux,
   Xcode CLT on macOS, WebView2 + Build Tools on Windows). See
@@ -24,7 +24,7 @@ Extended-JSON export).
 ## Setup
 
 ```bash
-nvm use
+mise install
 npm install
 ```
 

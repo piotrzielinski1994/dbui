@@ -1,0 +1,18 @@
+# mise config: pins the Node toolchain and wraps the test-stack docker compose.
+# Run a task with `mise run db:start` (or `mise db:start`).
+_.dir = "{{config_root}}"
+
+[tasks."db:start"]
+description = "Start the seeded Postgres/MySQL test stack (detached)"
+run = "docker compose -f test-stack/docker-compose.yml up -d"
+
+[tasks."db:stop"]
+description = "Stop the test stack, keep data"
+run = "docker compose -f test-stack/docker-compose.yml stop"
+
+[tasks."db:down"]
+description = "Stop + remove the test stack and its volumes (re-seeds on next start)"
+run = "docker compose -f test-stack/docker-compose.yml down --volumes --remove-orphans"
+
+[tools]
+node = "24"
