@@ -2,6 +2,12 @@
 
 UI design rules for this app. Entries are about *visual language and interaction*, not domain logic. Read this before any UI change.
 
+## Components
+
+- **Reach for a shadcn/ui primitive first, always.** Before hand-rolling any UI element (button, dialog, select, tabs, tooltip, switch, popover, toast, ...), use the shadcn component in [src/components/ui/](../src/components/ui/) - add it (`npx shadcn add <name>`) if it's not there yet. Don't reinvent a primitive shadcn already ships. Strip its `rounded-*` per the Corners rule.
+- **Toasts = sonner.** sonner IS the canonical shadcn toast (the old radix `toast`/`useToast` is deprecated). Use `toast(...)` from `sonner` via the [src/components/ui/sonner.tsx](../src/components/ui/sonner.tsx) `Toaster` wrapper. Never hand-roll a toast provider. The single `<Toaster/>` mounts in [src/routes/__root.tsx](../src/routes/__root.tsx) so every route/state (workspace, `/settings`, empty, loading) can raise a toast - a Toaster mounted in a leaf route layout has no subscribers on sibling routes and those toasts silently never render.
+- Hand-roll only when no shadcn primitive fits (e.g. the square Switch below, which exists because shadcn's is a rounded pill) - and document why here.
+
 ## Corners
 
 - **No rounded corners. Anywhere.** Sharp edges only. The radius token is pinned to zero (`--radius: 0rem` and every `--radius-{sm,md,lg,xl}: 0rem`) - never raise it.

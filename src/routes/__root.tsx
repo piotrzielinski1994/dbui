@@ -9,6 +9,14 @@ import {
   createWindowController,
 } from "@/lib/window/window-controller";
 import { WindowFullscreenSync } from "@/lib/window/window-fullscreen-sync";
+import {
+  createNoopUpdateController,
+  createUpdateController,
+  getAppVersion,
+} from "@/lib/updater/update-controller";
+import { UpdateChecker } from "@/lib/updater/update-checker";
+import { UpdaterProvider } from "@/lib/updater/updater-context";
+import { Toaster } from "@/components/ui/sonner";
 
 // Only the real Tauri host has a window to drive; the dev-browser AND the jsdom test env (both
 // non-Tauri) get the noop, so getCurrentWindow() - which throws without a Tauri host - is never
@@ -17,15 +25,27 @@ function createWindowControllerForEnv() {
   return isTauri() ? createWindowController() : createNoopWindowController();
 }
 
+function createUpdateControllerForEnv() {
+  return isTauri() ? createUpdateController() : createNoopUpdateController();
+}
+
 function RootLayout() {
   const [settingsStore] = useState(createTauriSettingsStore);
   const [windowController] = useState(createWindowControllerForEnv);
+  const [updateController] = useState(createUpdateControllerForEnv);
 
   return (
     <SettingsProvider store={settingsStore}>
       <WindowFullscreenSync controller={windowController} />
       <ThemeProvider>
-        <Outlet />
+        <UpdaterProvider
+          controller={updateController}
+          getVersion={getAppVersion}
+        >
+          <UpdateChecker controller={updateController} />
+          <Outlet />
+        </UpdaterProvider>
+        <Toaster />
       </ThemeProvider>
     </SettingsProvider>
   );

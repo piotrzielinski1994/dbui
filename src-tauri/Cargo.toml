@@ -24,6 +24,8 @@ tauri-plugin-store = "2"
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-process = "2"
 log = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1", features = ["derive"] }

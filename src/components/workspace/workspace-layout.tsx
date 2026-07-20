@@ -20,7 +20,6 @@ import {
   quickOpenTarget,
 } from "@/lib/workspace/quick-open";
 import { useThemeToggle } from "@/lib/theme/theme-context";
-import { Toaster } from "@/components/ui/sonner";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
@@ -287,7 +286,6 @@ export function WorkspaceLayout({
         open={isFolderDialogOpen}
         onOpenChange={setIsFolderDialogOpen}
       />
-      <Toaster />
     </>
   );
 }

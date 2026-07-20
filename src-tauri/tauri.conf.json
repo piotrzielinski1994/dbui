@@ -22,8 +22,17 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNzQxOEZCNUNGQzIyOTcKUldTWEl2eGMreGgwTUpFMEdQMVVwanhwWVRRblJxaVRCWXJBWmF4R2YwSFI1OHRqWjVQdGh1L0wK",
+      "endpoints": [
+        "https://github.com/piotrzielinski1994/purequery/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",

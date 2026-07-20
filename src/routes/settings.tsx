@@ -3,6 +3,7 @@ import { rootRoute } from "@/routes/__root";
 import { ThemeSection } from "@/components/settings/theme-section";
 import { RowLimitSection } from "@/components/settings/row-limit-section";
 import { ShortcutsSection } from "@/components/settings/shortcuts-section";
+import { UpdatesSection } from "@/components/settings/updates-section";
 
 function SettingsPage() {
   return (
@@ -16,6 +17,7 @@ function SettingsPage() {
       <ThemeSection />
       <RowLimitSection />
       <ShortcutsSection />
+      <UpdatesSection />
     </div>
   );
 }

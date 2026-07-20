@@ -28,7 +28,6 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  // WorkspaceLayout renders <Toaster />, so the mock must also export it.
   Toaster: () => null,
   toast: {
     success: vi.fn(),

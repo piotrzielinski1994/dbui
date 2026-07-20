@@ -184,6 +184,25 @@ The dev server runs on port 1431 (set in both `vite.config.ts` and `src-tauri/ta
 > connection serialise; manual-commit transactions are a simple `BEGIN TRAN` + flag on that held
 > connection.
 
+## Releases & auto-update
+
+Releases are cut by the `Release` GitHub Actions workflow (`workflow_dispatch`,
+input a tag like `v0.2.0`) - it builds macOS / Windows / Linux bundles via
+`tauri-action` and publishes a draft GitHub release with the installers plus
+updater artifacts (`.sig` files + a `latest.json`).
+
+The app self-updates via the Tauri v2 updater plugin: on launch (and via
+**Settings > Updates > Check for updates**) it reads
+`releases/latest/download/latest.json` and, on a newer signed version, shows a
+persistent toast with an **Update now** action that downloads and relaunches.
+
+Signing requires two GitHub repo secrets consumed by the release workflow:
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the
+minisign keypair whose public half is baked into `tauri.conf.json`
+`plugins.updater.pubkey`). **Caveat:** auto-update only works *forward* from the
+first updater-enabled release - the already-installed v0.1.0 has no updater, so
+upgrading to the first signed build is a one-time manual download.
+
 ## Repo layout
 
 ```
@@ -215,7 +234,9 @@ src/
                         workspace/ (sidebar tree from a picked workspace folder: model +
                         disk-format serialize/deserialize + per-db codec (mergeDatabaseFile/
                         hydrateDatabase/dehydrateDatabase), WorkspaceFs port + tauri-fs/in-memory-fs,
-                        reconcile, slug, folder-picker)
+                        reconcile, slug, folder-picker),
+                        updater/ (UpdateController port + noop, app-version, sonner
+                        showUpdateToast, UpdateChecker startup bridge, UpdaterProvider)
   index.css             Tailwind v4 + theme tokens
   test/setup.ts         Vitest + Testing Library setup
 src-tauri/              Rust desktop shell: db.rs (Postgres/MySQL/SQLite via sqlx Any), mongo.rs
