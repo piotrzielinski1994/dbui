@@ -173,7 +173,7 @@ function RecordView({
         const isEditing = editable && editing === name;
         return (
           <li key={name} className="flex border-b last:border-0">
-            <span className="w-48 shrink-0 border-r px-3 py-1.5 font-mono font-medium text-muted-foreground">
+            <span className="w-48 shrink-0 border-r px-3 py-1.5 font-mono font-medium break-all text-muted-foreground">
               {name}
             </span>
             <span
