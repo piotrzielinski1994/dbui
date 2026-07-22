@@ -1,8 +1,8 @@
+import { Button } from "@pziel/pureui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Table, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,

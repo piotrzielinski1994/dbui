@@ -1,7 +1,6 @@
-import { cn } from "@pziel/pureui";
+import { Button, cn } from "@pziel/pureui";
 import { Eye, EyeOff } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,

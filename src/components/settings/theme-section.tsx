@@ -1,8 +1,8 @@
 import { Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
+import { Button } from "@pziel/pureui";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { makeSchemaExtensions } from "@/components/workspace/schema-intellisense";
 import { themeColorsJsonSchema } from "@/lib/config-schema/json-schemas";
 import type {

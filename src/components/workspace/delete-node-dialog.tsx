@@ -1,5 +1,4 @@
-import { cn } from "@pziel/pureui";
-import { Button } from "@/components/ui/button";
+import { Button, cn } from "@pziel/pureui";
 import {
   Dialog,
   DialogContent,

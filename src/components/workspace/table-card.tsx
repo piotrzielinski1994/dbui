@@ -1,4 +1,4 @@
-import { cn } from "@pziel/pureui";
+import { Button, cn } from "@pziel/pureui";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -8,7 +8,6 @@ import {
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
