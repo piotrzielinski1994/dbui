@@ -1,4 +1,12 @@
-import { Button } from "@pziel/pureui";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@pziel/pureui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Table, X } from "lucide-react";
 import { useState } from "react";
@@ -9,14 +17,6 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { EngineIcon } from "@/components/workspace/engine-icon";
 import { SqlText } from "@/components/workspace/sql-text";
 import { Tab, TabBar } from "@/components/workspace/tab-bar";

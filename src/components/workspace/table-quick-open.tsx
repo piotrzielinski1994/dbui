@@ -1,11 +1,11 @@
-import { Database, Folder, Table } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/components/ui/command";
+} from "@pziel/pureui";
+import { Database, Folder, Table } from "lucide-react";
 import {
   type QuickOpenEntry,
   scoreQuickOpen,

@@ -1,10 +1,10 @@
-import { memo, useCallback } from "react";
-import type { GroupImperativeHandle } from "react-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable";
+} from "@pziel/pureui";
+import { memo, useCallback } from "react";
+import type { GroupImperativeHandle } from "react-resizable-panels";
 import { Console } from "@/components/workspace/console";
 import { Content } from "@/components/workspace/content";
 import {

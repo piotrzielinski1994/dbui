@@ -1,21 +1,19 @@
-import { Button } from "@pziel/pureui";
-import { useState } from "react";
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
+  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@pziel/pureui";
+import { useState } from "react";
 import { type Cell, DataGrid } from "@/components/workspace/data-grid";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";

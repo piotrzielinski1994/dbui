@@ -1,10 +1,10 @@
-import { type CSSProperties, useCallback, useEffect, useState } from "react";
-import type { GroupImperativeHandle } from "react-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable";
+} from "@pziel/pureui";
+import { type CSSProperties, useCallback, useEffect, useState } from "react";
+import type { GroupImperativeHandle } from "react-resizable-panels";
 import { CommandPalette } from "@/components/workspace/command-palette";
 import { Main } from "@/components/workspace/main";
 import { NewFolderDialog } from "@/components/workspace/new-folder-dialog";

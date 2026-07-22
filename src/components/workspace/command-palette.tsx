@@ -1,4 +1,3 @@
-import { formatForDisplay } from "@tanstack/react-hotkeys";
 import {
   CommandDialog,
   CommandEmpty,
@@ -7,7 +6,8 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
-} from "@/components/ui/command";
+} from "@pziel/pureui";
+import { formatForDisplay } from "@tanstack/react-hotkeys";
 import {
   PALETTE_COMMANDS,
   PALETTE_GROUP_ORDER,

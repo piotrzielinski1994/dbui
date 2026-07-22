@@ -1,13 +1,13 @@
-import { Button } from "@pziel/pureui";
-import { useState } from "react";
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+  Input,
+} from "@pziel/pureui";
+import { useState } from "react";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 
 type NewFolderDialogProps = {

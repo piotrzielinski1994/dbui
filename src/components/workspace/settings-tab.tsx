@@ -1,13 +1,14 @@
-import { Button, cn } from "@pziel/pureui";
-import { Eye, EyeOff } from "lucide-react";
-import { type ReactNode, useState } from "react";
-import { Input } from "@/components/ui/input";
 import {
+  Button,
+  cn,
+  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-} from "@/components/ui/select";
+} from "@pziel/pureui";
+import { Eye, EyeOff } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useConnectionActions } from "@/components/workspace/use-connection";
 import { useWorkspace } from "@/components/workspace/workspace-context";
 import type {

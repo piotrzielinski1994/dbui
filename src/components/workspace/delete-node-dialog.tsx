@@ -1,12 +1,13 @@
-import { Button, cn } from "@pziel/pureui";
 import {
+  Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@pziel/pureui";
 import type { TreeNode } from "@/lib/workspace/model";
 
 type DeleteNodeDialogProps = {

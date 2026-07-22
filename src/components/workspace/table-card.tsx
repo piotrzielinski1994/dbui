@@ -1,4 +1,13 @@
-import { Button, cn } from "@pziel/pureui";
+import {
+  Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@pziel/pureui";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -8,14 +17,6 @@ import {
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   type Cell,
