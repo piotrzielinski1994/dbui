@@ -9,6 +9,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import { matchesAny } from "@pziel/pureui";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
@@ -38,7 +39,6 @@ import {
 } from "@/components/workspace/workspace-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { dragOverlayLabel } from "@/lib/workspace/drag-overlay-label";
 import { isEditableTarget } from "@/lib/workspace/is-editable-target";

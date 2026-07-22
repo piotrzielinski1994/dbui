@@ -7,6 +7,7 @@ import { syntaxHighlighting } from "@codemirror/language";
 import { type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
+import { toCodeMirrorKey } from "@pziel/pureui";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo } from "react";
 import { editorFind } from "@/components/workspace/editor-find";
@@ -18,7 +19,6 @@ import {
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
-import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
 import { applyDefaults } from "@/lib/theme/overrides";
 import { useThemeOptional } from "@/lib/theme/theme-context";
 import { DEFAULT_THEME_COLORS } from "@/lib/theme/theme-defaults";

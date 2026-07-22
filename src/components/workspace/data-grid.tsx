@@ -1,4 +1,4 @@
-import { cn } from "@pziel/pureui";
+import { cn, matchesAny } from "@pziel/pureui";
 import {
   createColumnHelper,
   flexRender,
@@ -30,7 +30,6 @@ import {
   exportFileName,
   exportFilters,
 } from "@/lib/export-file";
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 import type { ShortcutOverrides } from "@/lib/shortcuts/registry";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import {

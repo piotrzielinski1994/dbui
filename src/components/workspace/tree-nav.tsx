@@ -1,5 +1,5 @@
+import { matchesAny } from "@pziel/pureui";
 import { createContext, type KeyboardEvent, useContext } from "react";
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 
 // Shared state between SidebarTree (which owns the roving anchor, the row-element
 // ref map, and the keydown dispatch) and each TreeRow (which registers its element,

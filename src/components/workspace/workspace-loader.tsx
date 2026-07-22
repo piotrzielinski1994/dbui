@@ -1,3 +1,4 @@
+import { matchesAny } from "@pziel/pureui";
 import { useCallback, useEffect, useState } from "react";
 import { WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { WorkspaceLayout } from "@/components/workspace/workspace-layout";
@@ -5,7 +6,6 @@ import { logMessage } from "@/lib/logging/file-log";
 import type { LogStream } from "@/lib/logging/log-stream";
 import type { Settings } from "@/lib/settings/settings";
 import { useSettings } from "@/lib/settings/settings-context";
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { deserialize, serialize } from "@/lib/workspace/disk-format";
 import type { FolderPicker } from "@/lib/workspace/folder-picker";

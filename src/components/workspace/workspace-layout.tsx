@@ -1,4 +1,5 @@
 import {
+  matchesAny,
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -18,7 +19,6 @@ import {
 } from "@/components/workspace/workspace-context";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
 import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { useThemeToggle } from "@/lib/theme/theme-context";

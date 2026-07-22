@@ -3,6 +3,7 @@ import { syntaxHighlighting } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
+import { toCodeMirrorKey } from "@pziel/pureui";
 import CodeMirror, { type BasicSetupOptions } from "@uiw/react-codemirror";
 import { useEffect, useMemo, useState } from "react";
 import type { Cell } from "@/components/workspace/data-grid";
@@ -15,7 +16,6 @@ import {
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
-import { toCodeMirrorKey } from "@/lib/shortcuts/to-codemirror-key";
 import { applyDefaults } from "@/lib/theme/overrides";
 import { useThemeOptional } from "@/lib/theme/theme-context";
 import { DEFAULT_THEME_COLORS } from "@/lib/theme/theme-defaults";

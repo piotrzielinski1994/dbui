@@ -1,4 +1,4 @@
-import { matchesAny } from "@/lib/shortcuts/match-hotkey";
+import { matchesAny } from "@pziel/pureui";
 import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 import type { TreeNode } from "@/lib/workspace/model";
 import type { MoveTarget } from "@/lib/workspace/move";
