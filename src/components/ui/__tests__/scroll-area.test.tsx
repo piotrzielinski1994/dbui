@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -138,7 +139,10 @@ describe("ScrollArea no-rounded / no-bg-border guard (AC-004)", () => {
 });
 
 describe("Global thin scrollbar CSS (AC-002)", () => {
-  const css = readRepoFile("src/index.css");
+  const css = readFileSync(
+    createRequire(import.meta.url).resolve("@pziel/pureui/styles/theme.css"),
+    "utf8",
+  );
 
   // TC-003 - index.css declares scrollbar-width: thin on the universal rule.
   it("should declare scrollbar-width: thin in index.css", () => {
