@@ -1,3 +1,5 @@
+import type { SettingsStore as GenericSettingsStore } from "@pziel/pureui";
+
 import type { SplitOrientation } from "@/components/workspace/workspace-context";
 import {
   SHORTCUT_ACTIONS,
@@ -91,10 +93,7 @@ export type Settings = {
   shortcuts: ShortcutOverrides;
 };
 
-export type SettingsStore = {
-  load: () => Promise<Settings>;
-  save: (settings: Settings) => Promise<void>;
-};
+export type SettingsStore = GenericSettingsStore<Settings>;
 
 function emptyThemeColors(): ThemeColors {
   return {
