@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
   matchesAny,
+  toResult,
 } from "@pziel/pureui";
 import {
   keepPreviousData,
@@ -49,7 +50,6 @@ import {
   useWorkspace,
 } from "@/components/workspace/workspace-context";
 import type { ExportFormat } from "@/lib/export-file";
-import { toResult } from "@/lib/result";
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";

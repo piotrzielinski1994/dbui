@@ -1,8 +1,5 @@
+import type { FolderPicker } from "@pziel/pureui";
 import { open } from "@tauri-apps/plugin-dialog";
-
-export type FolderPicker = {
-  pick: () => Promise<string | null>;
-};
 
 export function createTauriFolderPicker(): FolderPicker {
   return {
@@ -10,11 +7,5 @@ export function createTauriFolderPicker(): FolderPicker {
       open({ directory: true, multiple: false })
         .then((selected) => (typeof selected === "string" ? selected : null))
         .catch(() => null),
-  };
-}
-
-export function createNoopFolderPicker(): FolderPicker {
-  return {
-    pick: () => Promise.resolve(null),
   };
 }

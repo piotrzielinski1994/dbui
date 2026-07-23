@@ -1,4 +1,4 @@
-import type { Result } from "@/lib/result";
+import type { Result } from "@pziel/pureui";
 
 // The mock data generator (F17): pure, deterministic synthetic-row generation for the open table.
 // One strategy per column; `generateRows` produces string|null cells matching the existing insert

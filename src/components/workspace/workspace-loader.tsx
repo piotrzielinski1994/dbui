@@ -1,4 +1,4 @@
-import { matchesAny } from "@pziel/pureui";
+import { type FolderPicker, matchesAny } from "@pziel/pureui";
 import { useCallback, useEffect, useState } from "react";
 import { WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { WorkspaceLayout } from "@/components/workspace/workspace-layout";
@@ -8,7 +8,6 @@ import type { Settings } from "@/lib/settings/settings";
 import { useSettings } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { deserialize, serialize } from "@/lib/workspace/disk-format";
-import type { FolderPicker } from "@/lib/workspace/folder-picker";
 import type { WorkspaceFs } from "@/lib/workspace/fs";
 import type { TreeNode } from "@/lib/workspace/model";
 

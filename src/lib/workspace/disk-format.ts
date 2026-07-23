@@ -1,5 +1,5 @@
+import { slugify, uniqueSlug } from "@pziel/pureui";
 import type { FolderNode, TreeNode } from "@/lib/workspace/model";
-import { slugify, uniqueSlug } from "@/lib/workspace/slug";
 import {
   dehydrateDatabase,
   hydrateDatabase,

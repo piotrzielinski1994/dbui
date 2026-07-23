@@ -9,7 +9,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { matchesAny } from "@pziel/pureui";
+import { dragOverlayLabel, matchesAny } from "@pziel/pureui";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
@@ -40,7 +40,6 @@ import {
 import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
-import { dragOverlayLabel } from "@/lib/workspace/drag-overlay-label";
 import { isEditableTarget } from "@/lib/workspace/is-editable-target";
 import type { TreeNode } from "@/lib/workspace/model";
 import {

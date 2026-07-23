@@ -1,3 +1,4 @@
+import { createNoopFolderPicker } from "@pziel/pureui";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceLoader } from "@/components/workspace/workspace-loader";
@@ -10,7 +11,6 @@ import {
 import { SettingsProvider } from "@/lib/settings/settings-context";
 import { ThemeProvider } from "@/lib/theme/theme-context";
 import { serialize } from "@/lib/workspace/disk-format";
-import { createNoopFolderPicker } from "@/lib/workspace/folder-picker";
 import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
 import { QueryWrapper } from "@/test/query-wrapper";
 
