@@ -1,3 +1,4 @@
+import { createNoopFolderPicker, type FolderPicker } from "@pziel/pureui";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,8 +8,6 @@ import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { SettingsProvider } from "@/lib/settings/settings-context";
 import type { FileMap } from "@/lib/workspace/disk-format";
 import { serialize } from "@/lib/workspace/disk-format";
-import type { FolderPicker } from "@/lib/workspace/folder-picker";
-import { createNoopFolderPicker } from "@/lib/workspace/folder-picker";
 import type { WorkspaceFs } from "@/lib/workspace/fs";
 import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
 import type {

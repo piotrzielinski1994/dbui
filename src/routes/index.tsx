@@ -1,3 +1,4 @@
+import { createNoopFolderPicker } from "@pziel/pureui";
 import { createRoute } from "@tanstack/react-router";
 import { isTauri } from "@tauri-apps/api/core";
 import { useState } from "react";
@@ -6,11 +7,8 @@ import {
   createNoopLogStream,
   createTauriLogStream,
 } from "@/lib/logging/log-stream";
-import {
-  createNoopFolderPicker,
-  createTauriFolderPicker,
-} from "@/lib/workspace/folder-picker";
 import { createInMemoryWorkspaceFs } from "@/lib/workspace/in-memory-fs";
+import { createTauriFolderPicker } from "@/lib/workspace/tauri-folder-picker";
 import { createTauriWorkspaceFs } from "@/lib/workspace/tauri-fs";
 import { rootRoute } from "@/routes/__root";
 

@@ -1,5 +1,5 @@
+import { toResult } from "@pziel/pureui";
 import { toast } from "sonner";
-import { toResult } from "@/lib/result";
 import {
   cancelConnect,
   connectDatabase,

@@ -1,8 +1,12 @@
 import {
   matchesAny,
+  PANEL_RESIZE_STEP,
+  type PanelResizeTarget,
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
+  resolveFocusedPanel,
+  stepLayout,
 } from "@pziel/pureui";
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import type { GroupImperativeHandle } from "react-resizable-panels";
@@ -23,12 +27,6 @@ import type { ShortcutActionId } from "@/lib/shortcuts/registry";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { useThemeToggle } from "@/lib/theme/theme-context";
 import { connectionOf } from "@/lib/workspace/model";
-import {
-  PANEL_RESIZE_STEP,
-  type PanelResizeTarget,
-  resolveFocusedPanel,
-  stepLayout,
-} from "@/lib/workspace/panel-resize";
 import {
   buildQuickOpenEntries,
   quickOpenTarget,
@@ -79,9 +77,9 @@ export function WorkspaceLayout({
   // sidebar/console does not move DOM focus into it, so document.activeElement alone can't tell a
   // resize which panel is active; this tracks the last-clicked panel (null when the last click was
   // outside a resizable panel, e.g. the content area) as the fallback target.
-  const [pointerTarget, setPointerTarget] = useState<PanelResizeTarget | null>(
-    null,
-  );
+  const [pointerTarget, setPointerTarget] = useState<PanelResizeTarget<
+    "workspace" | "main"
+  > | null>(null);
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const next = resolveFocusedPanel(event.target as Element | null);
@@ -96,7 +94,7 @@ export function WorkspaceLayout({
   // The panel focused when the command palette opened. Running a resize action from the palette
   // can't read document.activeElement (focus is trapped in the modal), so it falls back to this snapshot.
   const [paletteResizeTarget, setPaletteResizeTarget] =
-    useState<PanelResizeTarget | null>(null);
+    useState<PanelResizeTarget<"workspace" | "main"> | null>(null);
   const openPalette = useCallback(() => {
     setPaletteResizeTarget(
       resolveFocusedPanel(document.activeElement) ?? pointerTarget,

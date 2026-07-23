@@ -1,4 +1,5 @@
 import {
+  PANEL_RESIZE_STEP,
   type PaletteCommand,
   CommandPalette as PaletteShell,
 } from "@pziel/pureui";
@@ -19,7 +20,6 @@ import { DEFAULT_SETTINGS } from "@/lib/settings/settings";
 import { useSettingsOptional } from "@/lib/settings/settings-context";
 import { resolveShortcuts } from "@/lib/shortcuts/resolve";
 import { useThemeToggle } from "@/lib/theme/theme-context";
-import { PANEL_RESIZE_STEP } from "@/lib/workspace/panel-resize";
 
 type CommandPaletteProps = {
   open: boolean;
